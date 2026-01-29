@@ -48,9 +48,12 @@ spec:
         app: healthcp
         environment: qa
     spec:
+      imagePullSecrets:
+        - name: ecr-secret
       containers:
         - name: healthcp
           image: PLACEHOLDER_IMAGE
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
               name: http
@@ -63,13 +66,13 @@ spec:
               cpu: "500m"
           readinessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 80
             initialDelaySeconds: 15
             periodSeconds: 20

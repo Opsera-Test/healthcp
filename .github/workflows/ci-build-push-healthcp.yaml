@@ -295,14 +295,21 @@ jobs:
           # Replace ACCOUNT_ID placeholder and apply
           kustomize build . | sed "s/ACCOUNT_ID/${ACCOUNT_ID}/g" | kubectl apply -n ${NAMESPACE} -f -
           
-          # Force rollout restart to ensure new image is pulled
-          echo "Forcing rollout restart to pull new image: ${IMAGE_TAG}..."
-          kubectl rollout restart deployment/healthcp -n ${NAMESPACE} || true
+          # Force restart based on environment type
+          echo "Forcing restart to pull new image: ${IMAGE_TAG}..."
           
-          # Wait for rollout to complete
-          kubectl rollout status deployment/healthcp -n ${NAMESPACE} --timeout=180s || true
+          if [ "$ENVIRONMENT" = "dev" ]; then
+            # DEV uses standard Deployment
+            kubectl rollout restart deployment/healthcp -n ${NAMESPACE} || true
+            kubectl rollout status deployment/healthcp -n ${NAMESPACE} --timeout=180s || true
+          else
+            # QA/Staging use Argo Rollouts
+            # Restart by patching the rollout with a new annotation
+            kubectl patch rollout healthcp-rollout -n ${NAMESPACE} \
+              -p '{"spec":{"restartAt":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}}' --type=merge || true
+          fi
           
-          echo "✅ Manifests applied and deployment restarted in ${NAMESPACE}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Manifests applied and restarted in ${NAMESPACE}" >> $GITHUB_STEP_SUMMARY
           echo "**Image Tag:** \`${IMAGE_TAG}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Deployment
@@ -327,15 +334,19 @@ jobs:
               READY=$(kubectl get deployment healthcp -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
               TOTAL=$(kubectl get deployment healthcp -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
             else
-              # Argo Rollouts
-              STATUS=$(kubectl argo rollouts status healthcp-rollout -n $NAMESPACE --timeout=10s 2>/dev/null || echo "Progressing")
-              if [[ "$STATUS" == *"Healthy"* ]]; then
+              # Argo Rollouts - check rollout status via kubectl
+              PHASE=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+              READY=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+              TOTAL=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              
+              echo "Rollout Phase: ${PHASE}, Ready: ${READY}/${TOTAL}"
+              
+              if [[ "$PHASE" == "Healthy" ]]; then
                 echo "✅ Rollout healthy"
                 echo "success=true" >> $GITHUB_OUTPUT
+                echo "### ✅ Canary Rollout Successful" >> $GITHUB_STEP_SUMMARY
                 exit 0
               fi
-              READY=0
-              TOTAL=1
             fi
             
             echo "Ready: ${READY}/${TOTAL}"
