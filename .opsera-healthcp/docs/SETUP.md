@@ -16,6 +16,33 @@ This document provides step-by-step instructions for setting up the CI/CD pipeli
 | **Environments** | DEV → QA → Staging |
 | **Promotion** | Manual |
 
+### Hub-and-Spoke Architecture
+
+| Cluster | Name | Purpose |
+|---------|------|---------|
+| **Hub (ArgoCD)** | `argocd-use1` | ArgoCD management cluster |
+| **Spoke (Workload)** | `opsera-use1-np` | Workload cluster (nonprod) |
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    HUB-AND-SPOKE ARCHITECTURE                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│    ┌─────────────────────┐         ┌─────────────────────┐             │
+│    │   HUB CLUSTER       │         │  SPOKE CLUSTER      │             │
+│    │   argocd-use1       │         │  opsera-use1-np     │             │
+│    │                     │         │                     │             │
+│    │  ┌───────────────┐  │  GitOps │  ┌───────────────┐  │             │
+│    │  │    ArgoCD     │──┼─────────┼─▶│  healthcp-dev │  │             │
+│    │  │               │  │   Sync  │  │  healthcp-qa  │  │             │
+│    │  │  Application  │  │         │  │  healthcp-stg │  │             │
+│    │  │  Definitions  │  │         │  └───────────────┘  │             │
+│    │  └───────────────┘  │         │                     │             │
+│    └─────────────────────┘         └─────────────────────┘             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Deployment Strategies
 
 | Environment | Strategy | Description |
@@ -130,10 +157,28 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ---
 
-## Step 5: Register ArgoCD Applications
+## Step 5: Register Workload Cluster with ArgoCD (Hub-Spoke)
+
+The workload cluster must be registered with ArgoCD in the hub cluster.
 
 ```bash
-# Apply ArgoCD application manifests
+# 1. Configure kubeconfig with both clusters
+aws eks update-kubeconfig --name argocd-use1 --region us-east-1 --alias argocd
+aws eks update-kubeconfig --name opsera-use1-np --region us-east-1 --alias workload
+
+# 2. Register workload cluster with ArgoCD (run from hub cluster context)
+kubectl config use-context argocd
+argocd cluster add workload --name opsera-use1-np
+
+# Verify cluster is registered
+argocd cluster list
+```
+
+## Step 6: Register ArgoCD Applications
+
+```bash
+# Apply ArgoCD application manifests to the hub cluster
+kubectl config use-context argocd
 kubectl apply -f .opsera-healthcp/argocd/dev.yaml
 kubectl apply -f .opsera-healthcp/argocd/qa.yaml
 kubectl apply -f .opsera-healthcp/argocd/staging.yaml

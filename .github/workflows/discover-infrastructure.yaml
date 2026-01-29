@@ -23,6 +23,9 @@ on:
 
 env:
   AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  # Hub-and-Spoke Cluster Names
+  ARGOCD_CLUSTER: argocd-use1
+  WORKLOAD_CLUSTER: opsera-use1-np
 
 permissions:
   contents: read

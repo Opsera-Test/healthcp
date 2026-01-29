@@ -34,7 +34,9 @@ on:
 env:
   APP_NAME: healthcp
   AWS_REGION: us-east-1
-  EKS_CLUSTER: opsera-eks-cluster
+  # Hub-and-Spoke Model
+  ARGOCD_CLUSTER: argocd-use1
+  WORKLOAD_CLUSTER: opsera-use1-np
 
 permissions:
   contents: read
@@ -59,7 +61,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster (where pods run)
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Stage 1 - ECR Check
         run: |
@@ -161,7 +166,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster (where pods run)
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Get Pod Logs
         run: |
@@ -200,7 +208,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster (where pods run)
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Debug ArgoCD
         run: |
@@ -237,7 +248,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster (where pods run)
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Force Sync ArgoCD
         run: |
@@ -272,7 +286,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster (where pods run)
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
           
           # Install Argo Rollouts kubectl plugin
           curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64

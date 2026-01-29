@@ -44,7 +44,11 @@ env:
   APP_NAME: healthcp
   AWS_REGION: us-east-1
   ECR_REPOSITORY: healthcp
-  EKS_CLUSTER: opsera-eks-cluster
+  # Hub-and-Spoke Model
+  # Hub (ArgoCD management): argocd-use1
+  # Spoke (Workload): opsera-use1-np (nonprod)
+  ARGOCD_CLUSTER: argocd-use1
+  WORKLOAD_CLUSTER: opsera-use1-np
 
 permissions:
   contents: write
@@ -234,7 +238,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Wait for Deployment
         id: wait
@@ -308,7 +315,10 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+          # Configure kubeconfig for workload cluster
+          aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
+          # Configure kubeconfig for ArgoCD hub cluster
+          aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
 
       - name: Get LoadBalancer Hostname
         id: get-lb
