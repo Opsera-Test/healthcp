@@ -14,7 +14,7 @@ resources:
 images:
 - name: PLACEHOLDER_IMAGE
   newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
-  newTag: d9fda24599cd9b5920f79f77c4003e323e517894-20260129214532
+  newTag: 2743b1511de1df685691454c6c4181c86b9100a7-20260129221651
 
 patches:
 - patch: |
