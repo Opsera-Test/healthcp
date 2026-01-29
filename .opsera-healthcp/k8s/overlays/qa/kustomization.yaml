@@ -8,18 +8,18 @@ kind: Kustomization
 namespace: healthcp-qa
 
 resources:
-  - namespace.yaml
-  - rollout.yaml
-  - services.yaml
-  - analysis-template.yaml
+- namespace.yaml
+- rollout.yaml
+- services.yaml
+- analysis-template.yaml
 
 # Note: We use Rollout instead of Deployment for canary
 # Base deployment is NOT included - replaced by rollout.yaml
 
 images:
-  - name: PLACEHOLDER_IMAGE
-    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/healthcp
-    newTag: latest
+- name: PLACEHOLDER_IMAGE
+  newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
+  newTag: 48eefe1ad7e9b94b152b273be5833283e10fbd0b-20260129215526
 
 commonLabels:
   environment: qa
