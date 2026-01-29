@@ -476,6 +476,7 @@ jobs:
           # L458: Jira Basic auth format
           AUTH=$(echo -n "$JIRA_EMAIL:$JIRA_API_TOKEN" | base64)
           
+          set +e
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Basic $AUTH" \
             -H "Content-Type: application/json" \
@@ -497,7 +498,14 @@ jobs:
                   }]
                 }
               }
-            }")
+            }" 2>&1)
+          JIRA_EXIT=$?
+          set -e
+          
+          if [ $JIRA_EXIT -ne 0 ]; then
+            echo "### 📋 Jira ticket creation failed (non-blocking)" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
           
           TICKET_KEY=$(echo "$RESPONSE" | jq -r '.key // "ERROR"')
           echo "### 📋 Jira Ticket: ${TICKET_KEY}" >> $GITHUB_STEP_SUMMARY
