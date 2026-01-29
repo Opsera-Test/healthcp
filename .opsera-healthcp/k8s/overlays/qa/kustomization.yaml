@@ -19,7 +19,7 @@ resources:
 images:
 - name: PLACEHOLDER_IMAGE
   newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
-  newTag: fd71ae7fd05b4567841e9758d6753d46078b9f5c-20260129220342
+  newTag: 633e63bc1077b76fd82455c6a426ce1441e42c8e-20260129222736
 
 commonLabels:
   environment: qa
