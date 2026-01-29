@@ -123,25 +123,11 @@ jobs:
             id = tolist(data.aws_vpcs.existing.ids)[0]
           }
 
-          data "aws_subnets" "private" {
+          # Get all subnets in the VPC
+          data "aws_subnets" "all" {
             filter {
               name   = "vpc-id"
               values = [data.aws_vpc.selected.id]
-            }
-            filter {
-              name   = "tag:Name"
-              values = ["*private*", "*Private*"]
-            }
-          }
-
-          data "aws_subnets" "public" {
-            filter {
-              name   = "vpc-id"
-              values = [data.aws_vpc.selected.id]
-            }
-            filter {
-              name   = "tag:Name"
-              values = ["*public*", "*Public*"]
             }
           }
 
@@ -149,8 +135,8 @@ jobs:
             hub_cluster_name   = "argocd-use1"
             spoke_cluster_name = "opsera-use1-np"
             
-            # Use discovered subnets or fall back to defaults
-            subnet_ids = length(data.aws_subnets.private.ids) > 0 ? data.aws_subnets.private.ids : data.aws_subnets.public.ids
+            # Use all subnets from the VPC (need at least 2 for EKS)
+            subnet_ids = slice(data.aws_subnets.all.ids, 0, min(3, length(data.aws_subnets.all.ids)))
           }
 
           # IAM Role for EKS Cluster
