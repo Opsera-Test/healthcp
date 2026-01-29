@@ -13,7 +13,7 @@ spec:
     blueGreen:
       activeService: healthcp-active
       previewService: healthcp-preview
-      autoPromotionEnabled: false
+      autoPromotionEnabled: true  # Auto-promote after successful analysis
       prePromotionAnalysis:
         templates:
           - templateName: http-health-check

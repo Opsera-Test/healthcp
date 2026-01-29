@@ -369,7 +369,11 @@ jobs:
               fi
             fi
             
-            echo "Ready: ${READY}/${TOTAL}"
+            echo "Ready: ${READY:-0}/${TOTAL:-0}"
+            
+            # Use default 0 for empty values to avoid integer comparison errors
+            READY=${READY:-0}
+            TOTAL=${TOTAL:-0}
             
             if [ "$READY" -eq "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
               echo "✅ Deployment ready"
