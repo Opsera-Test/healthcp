@@ -15,11 +15,18 @@ on:
   push:
     branches: [main]
     paths:
+      # Application code
       - 'src/**'
       - 'public/**'
       - 'package.json'
+      - 'package-lock.json'
+      # Container & server config
       - 'Dockerfile'
       - 'nginx.conf'
+      # K8s manifests (triggers redeployment)
+      - '.opsera-healthcp/k8s/**'
+      # Exclude workflow changes from auto-trigger (use workflow_dispatch)
+      # - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       environment:
