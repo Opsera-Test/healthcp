@@ -19,7 +19,7 @@ resources:
 images:
 - name: PLACEHOLDER_IMAGE
   newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
-  newTag: 1c0c866c15eab99a056af6e90aa918177488abaa-20260129223153
+  newTag: 70a21f9d20daa1012f71da4771974d40dd1d30bd-20260129225017
 
 commonLabels:
   environment: staging
