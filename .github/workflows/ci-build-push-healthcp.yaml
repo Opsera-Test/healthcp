@@ -341,17 +341,30 @@ jobs:
               READY=$(kubectl get deployment healthcp -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
               TOTAL=$(kubectl get deployment healthcp -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
             else
-              # Argo Rollouts - check rollout status via kubectl
+              # Argo Rollouts - check rollout status with canary details
               PHASE=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
               READY=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
               TOTAL=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
               
-              echo "Rollout Phase: ${PHASE}, Ready: ${READY}/${TOTAL}"
+              # Get canary-specific details
+              CURRENT_STEP=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.currentStepIndex}' 2>/dev/null || echo "0")
+              CANARY_WEIGHT=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.canary.weights.canary.weight}' 2>/dev/null || echo "0")
+              STABLE_WEIGHT=$(kubectl get rollout healthcp-rollout -n $NAMESPACE -o jsonpath='{.status.canary.weights.stable.weight}' 2>/dev/null || echo "100")
+              
+              if [ "$ENVIRONMENT" = "qa" ]; then
+                echo "🐤 Canary Status: Step ${CURRENT_STEP}, Traffic: ${CANARY_WEIGHT}% canary / ${STABLE_WEIGHT}% stable, Phase: ${PHASE}, Ready: ${READY}/${TOTAL}"
+              else
+                echo "🔵🟢 Blue-Green Status: Phase: ${PHASE}, Ready: ${READY}/${TOTAL}"
+              fi
               
               if [[ "$PHASE" == "Healthy" ]]; then
-                echo "✅ Rollout healthy"
+                echo "✅ Rollout healthy - 100% traffic to new version"
                 echo "success=true" >> $GITHUB_OUTPUT
-                echo "### ✅ Canary Rollout Successful" >> $GITHUB_STEP_SUMMARY
+                if [ "$ENVIRONMENT" = "qa" ]; then
+                  echo "### ✅ Canary Rollout Complete (10% → 30% → 60% → 100%)" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "### ✅ Blue-Green Rollout Complete" >> $GITHUB_STEP_SUMMARY
+                fi
                 exit 0
               fi
             fi
