@@ -44,9 +44,9 @@ env:
   APP_NAME: healthcp
   AWS_REGION: us-east-1
   ECR_REPOSITORY: healthcp
-  # Hub-and-Spoke Model
-  # Hub (ArgoCD management): argocd-use1
-  # Spoke (Workload): opsera-use1-np (nonprod)
+  # Hub-and-Spoke Model (Naming Convention)
+  # Hub: argocd-{short-region} → argocd-use1
+  # Spoke: {tenant}-{short-region}-{prod/np} → opsera-use1-np
   ARGOCD_CLUSTER: argocd-use1
   WORKLOAD_CLUSTER: opsera-use1-np
 
