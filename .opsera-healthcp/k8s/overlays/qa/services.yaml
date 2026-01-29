@@ -43,10 +43,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - healthcp-qa.agents.opsera.dev
+        - healthcp-qa.agent.opsera.dev
       secretName: healthcp-qa-tls
   rules:
-    - host: healthcp-qa.agents.opsera.dev
+    - host: healthcp-qa.agent.opsera.dev
       http:
         paths:
           - path: /

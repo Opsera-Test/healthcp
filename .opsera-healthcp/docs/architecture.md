@@ -103,9 +103,9 @@ sequenceDiagram
 
 | Environment | Strategy | Namespace | URL |
 |-------------|----------|-----------|-----|
-| DEV | Rolling Update | healthcp-dev | https://healthcp-dev.agents.opsera.dev |
-| QA | Canary (10%→30%→60%→100%) | healthcp-qa | https://healthcp-qa.agents.opsera.dev |
-| Staging | Blue-Green | healthcp-staging | https://healthcp-staging.agents.opsera.dev |
+| DEV | Rolling Update | healthcp-dev | https://healthcp-dev.agent.opsera.dev |
+| QA | Canary (10%→30%→60%→100%) | healthcp-qa | https://healthcp-qa.agent.opsera.dev |
+| Staging | Blue-Green | healthcp-staging | https://healthcp-staging.agent.opsera.dev |
 
 ## Quality Gates
 

@@ -43,10 +43,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - healthcp-staging.agents.opsera.dev
+        - healthcp-staging.agent.opsera.dev
       secretName: healthcp-staging-tls
   rules:
-    - host: healthcp-staging.agents.opsera.dev
+    - host: healthcp-staging.agent.opsera.dev
       http:
         paths:
           - path: /
@@ -69,10 +69,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - healthcp-staging-preview.agents.opsera.dev
+        - healthcp-staging-preview.agent.opsera.dev
       secretName: healthcp-staging-preview-tls
   rules:
-    - host: healthcp-staging-preview.agents.opsera.dev
+    - host: healthcp-staging-preview.agent.opsera.dev
       http:
         paths:
           - path: /

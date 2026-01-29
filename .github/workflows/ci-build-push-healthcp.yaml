@@ -386,7 +386,7 @@ jobs:
         env:
           ENVIRONMENT: ${{ needs.verify-bootstrap.outputs.environment }}
         run: |
-          FQDN="healthcp-${ENVIRONMENT}.agents.opsera.dev"
+          FQDN="healthcp-${ENVIRONMENT}.agent.opsera.dev"
           echo "record=$FQDN" >> $GITHUB_OUTPUT
           echo "📍 DNS Record: $FQDN" >> $GITHUB_STEP_SUMMARY
 
