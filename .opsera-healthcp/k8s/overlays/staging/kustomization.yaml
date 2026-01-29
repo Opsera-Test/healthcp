@@ -8,18 +8,18 @@ kind: Kustomization
 namespace: healthcp-staging
 
 resources:
-  - namespace.yaml
-  - rollout.yaml
-  - services.yaml
-  - analysis-template.yaml
+- namespace.yaml
+- rollout.yaml
+- services.yaml
+- analysis-template.yaml
 
 # Note: We use Rollout instead of Deployment for blue-green
 # Base deployment is NOT included - replaced by rollout.yaml
 
 images:
-  - name: PLACEHOLDER_IMAGE
-    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/healthcp
-    newTag: latest
+- name: PLACEHOLDER_IMAGE
+  newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
+  newTag: 1c0c866c15eab99a056af6e90aa918177488abaa-20260129223153
 
 commonLabels:
   environment: staging
