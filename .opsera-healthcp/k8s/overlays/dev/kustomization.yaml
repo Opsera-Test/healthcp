@@ -8,25 +8,25 @@ kind: Kustomization
 namespace: healthcp-dev
 
 resources:
-  - namespace.yaml
-  - ../../base
+- namespace.yaml
+- ../../base
 
 images:
-  - name: PLACEHOLDER_IMAGE
-    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/healthcp
-    newTag: latest
+- name: PLACEHOLDER_IMAGE
+  newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/healthcp
+  newTag: 648f63db8b3809091bf6de10bfc191411c552b95-20260129192218
 
 patches:
-  - target:
-      kind: Ingress
-      name: healthcp
-    patch: |
-      - op: replace
-        path: /spec/rules/0/host
-        value: healthcp-dev.agents.opsera.dev
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: healthcp-dev.agents.opsera.dev
+- patch: |
+    - op: replace
+      path: /spec/rules/0/host
+      value: healthcp-dev.agents.opsera.dev
+    - op: replace
+      path: /spec/tls/0/hosts/0
+      value: healthcp-dev.agents.opsera.dev
+  target:
+    kind: Ingress
+    name: healthcp
 
 commonLabels:
   environment: dev
