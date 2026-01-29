@@ -34,32 +34,21 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # Try OIDC first (role-to-assume), then fall back to access keys
-      - name: Configure AWS credentials (OIDC)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-        continue-on-error: true
-        id: aws-creds-oidc
-
-      - name: Configure AWS credentials (Access Keys)
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
         continue-on-error: true
-        id: aws-creds-keys
+        id: aws-creds
 
       - name: Check AWS Access
         id: check-access
         run: |
           echo "### 🔑 AWS Access Check" >> $GITHUB_STEP_SUMMARY
           
-          # Check if we have valid credentials from either method
+          # Check if we have valid credentials
           IDENTITY=$(aws sts get-caller-identity 2>/dev/null || echo "")
           
           if [ -n "$IDENTITY" ]; then
@@ -74,17 +63,10 @@ jobs:
           else
             echo "❌ **AWS credentials not configured**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Configure one of the following at org or repo level:" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Option 1: Access Keys**" >> $GITHUB_STEP_SUMMARY
+            echo "Configure the following secrets at org or repo level:" >> $GITHUB_STEP_SUMMARY
             echo '```bash' >> $GITHUB_STEP_SUMMARY
             echo 'gh secret set AWS_ACCESS_KEY_ID --body "AKIA..."' >> $GITHUB_STEP_SUMMARY
             echo 'gh secret set AWS_SECRET_ACCESS_KEY --body "..."' >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Option 2: OIDC Role**" >> $GITHUB_STEP_SUMMARY
-            echo '```bash' >> $GITHUB_STEP_SUMMARY
-            echo 'gh secret set AWS_ROLE_ARN --body "arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME"' >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "has_access=false" >> $GITHUB_OUTPUT
           fi
