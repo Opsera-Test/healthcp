@@ -64,14 +64,35 @@ jobs:
           helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
           helm repo update
           
-          # Install or upgrade NGINX Ingress
+          # Check if release is stuck and fix it
+          RELEASE_STATUS=$(helm status ingress-nginx -n ingress-nginx 2>/dev/null | grep STATUS || echo "")
+          if [[ "$RELEASE_STATUS" == *"pending"* ]] || [[ "$RELEASE_STATUS" == *"failed"* ]]; then
+            echo "Detected stuck/failed release, rolling back..."
+            helm rollback ingress-nginx -n ingress-nginx 2>/dev/null || true
+            sleep 5
+          fi
+          
+          # Install or upgrade NGINX Ingress with --atomic for auto-rollback
           helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
             --namespace ingress-nginx \
             --create-namespace \
             --set controller.service.type=LoadBalancer \
             --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"=nlb \
             --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-scheme"=internet-facing \
-            --wait --timeout 5m
+            --wait --timeout 5m \
+            --atomic || {
+              # If still failing, force cleanup and retry
+              echo "Retry with force cleanup..."
+              helm uninstall ingress-nginx -n ingress-nginx --wait 2>/dev/null || true
+              sleep 10
+              helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+                --namespace ingress-nginx \
+                --create-namespace \
+                --set controller.service.type=LoadBalancer \
+                --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"=nlb \
+                --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-scheme"=internet-facing \
+                --wait --timeout 5m
+            }
           
           echo "✅ NGINX Ingress Controller installed" >> $GITHUB_STEP_SUMMARY
 
