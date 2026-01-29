@@ -34,42 +34,59 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Configure AWS credentials
+      # Try OIDC first (role-to-assume), then fall back to access keys
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
         continue-on-error: true
-        id: aws-creds
+        id: aws-creds-oidc
+
+      - name: Configure AWS credentials (Access Keys)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+        id: aws-creds-keys
 
       - name: Check AWS Access
         id: check-access
         run: |
           echo "### 🔑 AWS Access Check" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ steps.aws-creds.outcome }}" != "success" ]; then
+          # Check if we have valid credentials from either method
+          IDENTITY=$(aws sts get-caller-identity 2>/dev/null || echo "")
+          
+          if [ -n "$IDENTITY" ]; then
+            ACCOUNT=$(echo "$IDENTITY" | jq -r '.Account')
+            ARN=$(echo "$IDENTITY" | jq -r '.Arn')
+            echo "✅ AWS Access Configured" >> $GITHUB_STEP_SUMMARY
+            echo "- **Account:** \`$ACCOUNT\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Identity:** \`$ARN\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "has_access=true" >> $GITHUB_OUTPUT
+            echo "account_id=$ACCOUNT" >> $GITHUB_OUTPUT
+          else
             echo "❌ **AWS credentials not configured**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "To enable discovery, add \`AWS_ROLE_ARN\` secret to this repository:" >> $GITHUB_STEP_SUMMARY
+            echo "Configure one of the following at org or repo level:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Option 1: Access Keys**" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo 'gh secret set AWS_ACCESS_KEY_ID --body "AKIA..."' >> $GITHUB_STEP_SUMMARY
+            echo 'gh secret set AWS_SECRET_ACCESS_KEY --body "..."' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Option 2: OIDC Role**" >> $GITHUB_STEP_SUMMARY
             echo '```bash' >> $GITHUB_STEP_SUMMARY
             echo 'gh secret set AWS_ROLE_ARN --body "arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME"' >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "has_access=false" >> $GITHUB_OUTPUT
-          else
-            IDENTITY=$(aws sts get-caller-identity 2>/dev/null || echo "")
-            if [ -n "$IDENTITY" ]; then
-              ACCOUNT=$(echo "$IDENTITY" | jq -r '.Account')
-              ARN=$(echo "$IDENTITY" | jq -r '.Arn')
-              echo "✅ AWS Access Configured" >> $GITHUB_STEP_SUMMARY
-              echo "- **Account:** \`$ACCOUNT\`" >> $GITHUB_STEP_SUMMARY
-              echo "- **Role:** \`$ARN\`" >> $GITHUB_STEP_SUMMARY
-              echo "- **Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
-              echo "has_access=true" >> $GITHUB_OUTPUT
-              echo "account_id=$ACCOUNT" >> $GITHUB_OUTPUT
-            else
-              echo "❌ AWS credentials invalid or expired" >> $GITHUB_STEP_SUMMARY
-              echo "has_access=false" >> $GITHUB_OUTPUT
-            fi
           fi
 
       - name: Discover EKS Clusters
