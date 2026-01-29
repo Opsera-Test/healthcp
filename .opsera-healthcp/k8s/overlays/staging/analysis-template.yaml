@@ -44,8 +44,8 @@ spec:
                         # Check if NewRelic is configured
                         if [ -z "$NR_API_KEY" ]; then
                           echo "NewRelic not configured - using basic health check"
-                          # Basic health check fallback
-                          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVICE_NAME}.healthcp-staging.svc.cluster.local/health)
+                          # Basic health check fallback (using / as Vite app has no /health endpoint)
+                          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVICE_NAME}.healthcp-staging.svc.cluster.local/)
                           if [ "$RESPONSE" = "200" ]; then
                             echo "1"
                           else
