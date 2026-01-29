@@ -239,6 +239,9 @@ jobs:
       deploy_success: ${{ steps.wait.outputs.success }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -252,6 +255,40 @@ jobs:
           aws eks update-kubeconfig --name ${{ env.WORKLOAD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias workload
           # Configure kubeconfig for ArgoCD hub cluster
           aws eks update-kubeconfig --name ${{ env.ARGOCD_CLUSTER }} --region ${{ env.AWS_REGION }} --alias argocd
+
+      - name: Create Namespace and Deploy
+        env:
+          ENVIRONMENT: ${{ needs.verify-bootstrap.outputs.environment }}
+          IMAGE_TAG: ${{ needs.verify-bootstrap.outputs.image_tag }}
+        run: |
+          NAMESPACE="healthcp-${ENVIRONMENT}"
+          
+          # Switch to workload cluster
+          kubectl config use-context workload
+          
+          # Create namespace if it doesn't exist
+          echo "Creating namespace ${NAMESPACE}..."
+          kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Get AWS Account ID for ECR
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          
+          # Create ECR pull secret
+          kubectl create secret docker-registry ecr-secret \
+            --docker-server=${ECR_REGISTRY} \
+            --docker-username=AWS \
+            --docker-password=$(aws ecr get-login-password --region ${{ env.AWS_REGION }}) \
+            -n ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply Kustomize manifests directly to workload cluster
+          echo "Applying manifests to ${NAMESPACE}..."
+          cd .opsera-healthcp/k8s/overlays/${ENVIRONMENT}
+          
+          # Replace ACCOUNT_ID placeholder and apply
+          kustomize build . | sed "s/ACCOUNT_ID/${ACCOUNT_ID}/g" | kubectl apply -n ${NAMESPACE} -f -
+          
+          echo "✅ Manifests applied to ${NAMESPACE}" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Deployment
         id: wait
