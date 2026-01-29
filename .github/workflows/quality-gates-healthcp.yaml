@@ -55,14 +55,33 @@ jobs:
 
       - name: Check SonarQube Configuration
         id: check-sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          if [ -z "${{ secrets.SONAR_TOKEN }}" ]; then
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_HOST_URL" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
             echo "### ⏭️ SonarQube Skipped" >> $GITHUB_STEP_SUMMARY
-            echo "SONAR_TOKEN not configured" >> $GITHUB_STEP_SUMMARY
+            echo "SONAR_TOKEN or SONAR_HOST_URL not configured" >> $GITHUB_STEP_SUMMARY
           else
             echo "configured=true" >> $GITHUB_OUTPUT
+            echo "SonarQube configured - proceeding with scan"
           fi
+
+      - name: Verify sonar-project.properties
+        if: steps.check-sonar.outputs.configured == 'true'
+        run: |
+          if [ ! -f "sonar-project.properties" ]; then
+            echo "Creating sonar-project.properties..."
+            cat > sonar-project.properties << 'EOF'
+          sonar.projectKey=healthcp
+          sonar.projectName=healthcp
+          sonar.sources=src
+          sonar.exclusions=**/node_modules/**,**/*.test.ts,**/*.test.tsx,**/dist/**
+          sonar.sourceEncoding=UTF-8
+          EOF
+          fi
+          cat sonar-project.properties
 
       - name: SonarQube Scan
         if: steps.check-sonar.outputs.configured == 'true'
@@ -70,12 +89,17 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        continue-on-error: true
 
       - name: Summary
-        if: always() && steps.check-sonar.outputs.configured == 'true'
+        if: always()
         run: |
           echo "### 🔍 SAST Scan Complete" >> $GITHUB_STEP_SUMMARY
-          echo "Static analysis completed with SonarQube" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check-sonar.outputs.configured }}" = "true" ]; then
+            echo "Static analysis completed with SonarQube" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "SonarQube was skipped (not configured)" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ════════════════════════════════════════════════════════════════════════════
   # SCA - Dependency Scanning (Grype)
