@@ -200,7 +200,7 @@ jobs:
           echo "| Type | CNAME |" >> $GITHUB_STEP_SUMMARY
           echo "| Target | \`$LB_HOSTNAME\` |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Create/Update Ingress with SSL
+      - name: Update Existing Ingress with SSL
         env:
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
@@ -210,18 +210,44 @@ jobs:
           # Ensure namespace exists
           kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           
-          # Create Ingress with SSL
-          cat <<EOF | kubectl apply -f -
+          # Check if ingress exists and update it
+          EXISTING_INGRESS=$(kubectl get ingress -n $NAMESPACE -o name 2>/dev/null | head -1)
+          
+          if [ -n "$EXISTING_INGRESS" ]; then
+            INGRESS_NAME=$(echo $EXISTING_INGRESS | cut -d'/' -f2)
+            echo "Found existing ingress: $INGRESS_NAME - updating with SSL annotations"
+            
+            # Patch existing ingress with SSL annotations
+            kubectl annotate ingress $INGRESS_NAME -n $NAMESPACE \
+              cert-manager.io/cluster-issuer=letsencrypt-prod \
+              nginx.ingress.kubernetes.io/ssl-redirect="true" \
+              --overwrite || true
+            
+            # Update ingress with TLS config
+            kubectl patch ingress $INGRESS_NAME -n $NAMESPACE --type=merge -p "{
+              \"spec\": {
+                \"ingressClassName\": \"nginx\",
+                \"tls\": [{
+                  \"hosts\": [\"$FQDN\"],
+                  \"secretName\": \"healthcp-tls\"
+                }]
+              }
+            }" || true
+            
+            echo "✅ Updated existing ingress with SSL" >> $GITHUB_STEP_SUMMARY
+          else
+            # Create new ingress if none exists
+            cat <<EOF | kubectl apply -f -
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
-            name: healthcp-ingress
+            name: healthcp
             namespace: $NAMESPACE
             annotations:
-              kubernetes.io/ingress.class: nginx
               cert-manager.io/cluster-issuer: letsencrypt-prod
               nginx.ingress.kubernetes.io/ssl-redirect: "true"
           spec:
+            ingressClassName: nginx
             tls:
             - hosts:
               - $FQDN
@@ -238,9 +264,12 @@ jobs:
                       port:
                         number: 80
           EOF
+            echo "✅ Created new ingress with SSL" >> $GITHUB_STEP_SUMMARY
+          fi
           
-          echo "### 🔒 Ingress with SSL configured" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Ingress configured" >> $GITHUB_STEP_SUMMARY
           echo "Host: \`$FQDN\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get ingress -n $NAMESPACE
 
       - name: Verify Deployment Exists
         env:
