@@ -22,7 +22,7 @@ commonLabels:
 images:
   - name: IMAGE_PLACEHOLDER
     newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/hcp-1-frontend
-    newTag: latest
+    newTag: ca217c96704e5ac9ebf1bddd2a68722a9dc11da2-20260130035926
 
 # Replica count for DEV
 replicas:
