@@ -20,10 +20,10 @@ app:
 # GITHUB SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
 github:
-  org: gayathri-opsera
+  org: opsera-agentic
   repo: healthcp
   branch: main
-  repo_url: https://github.com/gayathri-opsera/healthcp.git
+  repo_url: https://github.com/opsera-agentic/healthcp.git
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AWS SETTINGS
