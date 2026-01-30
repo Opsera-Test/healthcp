@@ -1,0 +1,53 @@
+# Temporary workflow to debug ArgoCD cluster registration
+name: "🔍 Debug ArgoCD Clusters"
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  HUB_CLUSTER: argocd-use1
+  SPOKE_CLUSTER: opsera-use1-np
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl for Hub Cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: List ArgoCD Registered Clusters
+        run: |
+          echo "### 🔍 ArgoCD Cluster Secrets" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get secrets -n argocd -l argocd.argoproj.io/secret-type=cluster -o custom-columns=NAME:.metadata.name,CLUSTER:.data.name 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No cluster secrets found" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### All ArgoCD Secrets" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get secrets -n argocd --show-labels 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Check ArgoCD Application Details
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 ArgoCD Application: hcp-1-dev" >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          kubectl get application hcp-1-dev -n argocd -o yaml 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Application not found" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Get Spoke Cluster Endpoint
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Spoke Cluster Endpoint" >> $GITHUB_STEP_SUMMARY
+          SPOKE_ENDPOINT=$(aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} --query 'cluster.endpoint' --output text)
+          echo "**Endpoint:** \`${SPOKE_ENDPOINT}\`" >> $GITHUB_STEP_SUMMARY
