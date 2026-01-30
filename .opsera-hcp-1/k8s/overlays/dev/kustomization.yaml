@@ -21,7 +21,7 @@ commonLabels:
 # Image placeholder - updated by CI/CD pipeline
 images:
   - name: IMAGE_PLACEHOLDER
-    newName: PLACEHOLDER_ECR_URI/hcp-1-frontend
+    newName: 792373136340.dkr.ecr.us-east-1.amazonaws.com/hcp-1-frontend
     newTag: latest
 
 # Replica count for DEV
