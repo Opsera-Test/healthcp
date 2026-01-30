@@ -24,9 +24,9 @@ spec:
     path: .opsera-hcp-1/k8s/overlays/dev
   
   destination:
-    # RULE 59: CRITICAL - Use cluster NAME for hub-spoke architecture
-    # DO NOT use: server: https://kubernetes.default.svc (deploys to hub!)
-    name: opsera-use1-np
+    # TEMPORARY: Deploy to hub cluster until spoke cluster is registered
+    # TODO: Register spoke cluster with ArgoCD and switch back to name: opsera-use1-np
+    server: https://kubernetes.default.svc
     namespace: hcp-1-dev
   
   syncPolicy:
