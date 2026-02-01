@@ -19,7 +19,7 @@ commonLabels:
 images:
   - name: healthcp-1
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-1
-    newTag: c9b49d9-20260201231702
+    newTag: d5a5a8c-20260201232437
 
 # Patch Ingress hostname for dev environment
 patches:
