@@ -53,15 +53,15 @@
     --vital-elevated: 38 90% 50%;
     --vital-critical: 0 70% 55%;
 
-    /* Sidebar */
-    --sidebar-background: 180 25% 18%;
-    --sidebar-foreground: 180 10% 90%;
-    --sidebar-primary: 180 45% 50%;
+    /* Sidebar - Light theme */
+    --sidebar-background: 200 20% 97%;
+    --sidebar-foreground: 210 25% 25%;
+    --sidebar-primary: 180 45% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 180 20% 25%;
-    --sidebar-accent-foreground: 180 10% 95%;
-    --sidebar-border: 180 15% 25%;
-    --sidebar-ring: 180 45% 50%;
+    --sidebar-accent: 200 15% 92%;
+    --sidebar-accent-foreground: 210 25% 20%;
+    --sidebar-border: 200 20% 88%;
+    --sidebar-ring: 180 45% 40%;
   }
 
   .dark {
