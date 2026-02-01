@@ -21,7 +21,7 @@ spec:
 
   source:
     # Will be updated by bootstrap workflow
-    repoURL: PLACEHOLDER_REPO_URL
+    repoURL: https://github.com/opsera-agentic/healthcp
     targetRevision: HEAD
     path: .opsera-healthcp-1/k8s/overlays/dev
 

@@ -18,7 +18,7 @@ commonLabels:
 # Image will be updated by CI/CD pipeline
 images:
   - name: healthcp-1
-    newName: PLACEHOLDER_ECR_URI
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-1
     newTag: latest
 
 # Patch Ingress hostname for dev environment
