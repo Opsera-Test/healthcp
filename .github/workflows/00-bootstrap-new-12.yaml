@@ -180,10 +180,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Update placeholders in manifests
         run: |
-          ECR_URI="${{ needs.verify-prerequisites.outputs.ecr_uri }}"
-          REPO_URL="${{ needs.verify-prerequisites.outputs.repo_url }}"
+          # Get ECR URI dynamically to avoid secret masking
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          REPO_URL="https://github.com/${{ github.repository }}.git"
           
           echo "🔧 Updating ECR URI placeholder to: ${ECR_URI}"
           echo "🔧 Updating Repo URL placeholder to: ${REPO_URL}"
@@ -191,6 +200,11 @@ jobs:
           # Update Kustomization with ECR URI
           sed -i "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" .opsera-new-12/k8s/overlays/dev/kustomization.yaml
           sed -i "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" .opsera-new-12/k8s/base/deployment.yaml
+          
+          # Also fix any empty image references (from previous failed runs)
+          sed -i "s|image: :latest|image: ${ECR_URI}:latest|g" .opsera-new-12/k8s/base/deployment.yaml
+          sed -i "s|name: $|name: ${ECR_URI}|g" .opsera-new-12/k8s/overlays/dev/kustomization.yaml
+          sed -i "s|newName: $|newName: ${ECR_URI}|g" .opsera-new-12/k8s/overlays/dev/kustomization.yaml
           
           # Update ArgoCD application with repo URL
           sed -i "s|PLACEHOLDER_REPO_URL|${REPO_URL}|g" .opsera-new-12/argocd/dev/application.yaml
