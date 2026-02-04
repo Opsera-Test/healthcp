@@ -23,12 +23,17 @@ env:
   AWS_REGION: us-west-2
   ECR_REPOSITORY: opsera/new-12
   HUB_CLUSTER: argocd-usw2
+  HUB_CLUSTER_NAME: argocd-usw2
   SPOKE_CLUSTER: opsera-usw2-np
   ARGOCD_SERVER: argocd-usw2.agent.opsera.dev
 
 concurrency:
   group: bootstrap-new-12
   cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
   # ══════════════════════════════════════════════════════════════════════════
@@ -129,7 +134,7 @@ jobs:
           echo "✅ Lifecycle policy applied"
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 3: Register Spoke Cluster with ArgoCD
+  # Job 3: Register Spoke Cluster (Optional - uses kubectl)
   # ══════════════════════════════════════════════════════════════════════════
   register-spoke:
     name: "Register Spoke Cluster"
@@ -138,38 +143,28 @@ jobs:
     if: always() && needs.verify-prerequisites.result == 'success' && (needs.create-ecr.result == 'success' || needs.create-ecr.result == 'skipped')
     continue-on-error: true
     steps:
-      - name: Install ArgoCD CLI
-        run: |
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ArgoCD
+      - name: Configure kubectl for Hub
         run: |
-          echo "🔐 Logging into ArgoCD at ${{ env.ARGOCD_SERVER }}..."
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --username admin \
-            --password "${{ secrets.ARGOCD_ADMIN_PASSWORD }}" \
-            --grpc-web \
-            --insecure
+          echo "🔧 Configuring kubectl for hub cluster..."
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          echo "✅ kubectl configured"
 
-      - name: Check if spoke cluster is registered
-        id: check-spoke
+      - name: Check spoke cluster registration
         run: |
-          if argocd cluster get ${{ env.SPOKE_CLUSTER }} 2>/dev/null; then
+          echo "🔍 Checking if spoke cluster is registered..."
+          if kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster 2>/dev/null | grep -q "${{ env.SPOKE_CLUSTER }}"; then
             echo "✅ Spoke cluster already registered: ${{ env.SPOKE_CLUSTER }}"
-            echo "registered=true" >> $GITHUB_OUTPUT
           else
-            echo "📡 Spoke cluster not registered"
-            echo "registered=false" >> $GITHUB_OUTPUT
+            echo "📡 Spoke cluster not found in ArgoCD secrets"
+            echo "⚠️  Manual spoke cluster registration may be required"
           fi
-
-      - name: Register spoke cluster
-        if: steps.check-spoke.outputs.registered == 'false'
-        run: |
-          echo "📡 Registering spoke cluster: ${{ env.SPOKE_CLUSTER }}"
-          echo "⚠️  Manual spoke cluster registration may be required"
-          echo "   Run: argocd cluster add ${{ env.SPOKE_CLUSTER }} --name ${{ env.SPOKE_CLUSTER }}"
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 4: Update Configuration Placeholders
@@ -217,7 +212,7 @@ jobs:
           fi
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 5: Create Repository Secret in ArgoCD
+  # Job 5: Create Repository Secret (uses kubectl)
   # ══════════════════════════════════════════════════════════════════════════
   create-repo-secret:
     name: "Create Repository Secret"
@@ -225,89 +220,91 @@ jobs:
     needs: [verify-prerequisites, create-ecr, register-spoke, update-config]
     if: always() && needs.update-config.result == 'success'
     steps:
-      - name: Install ArgoCD CLI
-        run: |
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ArgoCD
+      - name: Configure kubectl for Hub
         run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --username admin \
-            --password "${{ secrets.ARGOCD_ADMIN_PASSWORD }}" \
-            --grpc-web \
-            --insecure
+          echo "🔧 Configuring kubectl for hub cluster..."
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          echo "✅ kubectl configured"
 
       - name: Create repository secret
         run: |
           REPO_URL="${{ needs.verify-prerequisites.outputs.repo_url }}"
+          SECRET_NAME="repo-${{ env.APP_NAME }}"
           
           echo "🔐 Creating repository secret for: ${REPO_URL}"
           
-          # Check if repo already exists
-          if argocd repo get "${REPO_URL}" 2>/dev/null; then
-            echo "✅ Repository already registered in ArgoCD"
+          # Check if secret already exists
+          if kubectl get secret ${SECRET_NAME} -n argocd 2>/dev/null; then
+            echo "✅ Repository secret already exists"
           else
-            argocd repo add "${REPO_URL}" \
-              --username "${{ secrets.GH_USERNAME }}" \
-              --password "${{ secrets.GH_PAT }}" \
-              --name "new-12-repo"
+            kubectl create secret generic ${SECRET_NAME} \
+              --namespace argocd \
+              --from-literal=url="${REPO_URL}" \
+              --from-literal=username="${{ secrets.GH_USERNAME }}" \
+              --from-literal=password="${{ secrets.GH_PAT }}" \
+              --from-literal=type="git"
+            
+            kubectl label secret ${SECRET_NAME} -n argocd \
+              argocd.argoproj.io/secret-type=repository
+            
             echo "✅ Repository secret created"
           fi
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 6: Apply ArgoCD Application
+  # Job 6: Apply ArgoCD Application (uses kubectl)
   # ══════════════════════════════════════════════════════════════════════════
   apply-argocd-app:
     name: "Apply ArgoCD Application"
     runs-on: ubuntu-latest
     needs: [verify-prerequisites, create-ecr, register-spoke, update-config, create-repo-secret]
-    if: always() && needs.create-repo-secret.result == 'success'
+    if: always() && needs.update-config.result == 'success'
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          ref: main
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Pull latest changes
-        run: git pull origin main
-
-      - name: Install ArgoCD CLI
+      - name: Configure kubectl for Hub
         run: |
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
-
-      - name: Login to ArgoCD
-        run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --username admin \
-            --password "${{ secrets.ARGOCD_ADMIN_PASSWORD }}" \
-            --grpc-web \
-            --insecure
+          echo "🔧 Configuring kubectl for hub cluster..."
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          echo "✅ kubectl configured"
 
       - name: Apply ArgoCD Application
         run: |
-          echo "🚀 Applying ArgoCD Application: new-12-dev"
+          echo "🚀 Applying ArgoCD Application: ${{ env.APP_NAME }}-dev"
           
-          # Check if app exists
-          if argocd app get new-12-dev 2>/dev/null; then
-            echo "📝 Application exists, syncing..."
-            argocd app sync new-12-dev --prune
-          else
-            echo "📦 Creating new application..."
-            kubectl apply -f .opsera-new-12/argocd/dev/application.yaml --context ${{ env.HUB_CLUSTER }} || \
-            argocd app create -f .opsera-new-12/argocd/dev/application.yaml
-          fi
+          # Pull latest changes
+          git pull origin main
           
-          echo "✅ ArgoCD Application applied"
+          # Apply the ArgoCD Application manifest
+          kubectl apply -f .opsera-new-12/argocd/dev/application.yaml
+          
+          echo "✅ ArgoCD Application applied for dev"
+
+      - name: Verify Application Created
+        run: |
+          echo "🔍 Verifying ArgoCD Application..."
+          kubectl get application ${{ env.APP_NAME }}-dev -n argocd
+          echo "✅ Application verified"
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 7: Summary
   # ══════════════════════════════════════════════════════════════════════════
   summary:
-    name: "Bootstrap Summary"
+    name: "Summary"
     runs-on: ubuntu-latest
     needs: [verify-prerequisites, create-ecr, register-spoke, update-config, create-repo-secret, apply-argocd-app]
     if: always()

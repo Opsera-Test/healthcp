@@ -36,7 +36,7 @@ env:
   TENANT: opsera
   AWS_REGION: us-west-2
   ECR_REPOSITORY: opsera/new-12
-  ARGOCD_SERVER: argocd-usw2.agent.opsera.dev
+  HUB_CLUSTER_NAME: argocd-usw2
   ARGOCD_APP: new-12-dev
 
 concurrency:
