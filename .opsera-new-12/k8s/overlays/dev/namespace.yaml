@@ -1,0 +1,14 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kubernetes Namespace - dev environment
+# Pattern: {tenant}-{app}-{env}
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-new-12-dev
+  labels:
+    app: new-12
+    environment: dev
+    tenant: opsera
+    app.kubernetes.io/name: new-12
+    app.kubernetes.io/instance: new-12-dev

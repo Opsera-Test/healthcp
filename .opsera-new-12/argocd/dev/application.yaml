@@ -1,0 +1,31 @@
+# ════════════════════════════════════════════════════════════════════════════
+# ArgoCD Application - new-12-dev
+# RULE 59: Uses destination.name for spoke cluster reference
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: new-12-dev
+  namespace: argocd
+  labels:
+    app: new-12
+    environment: dev
+    tenant: opsera
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: PLACEHOLDER_REPO_URL
+    targetRevision: HEAD
+    path: .opsera-new-12/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-new-12-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true

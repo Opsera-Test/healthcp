@@ -1,0 +1,27 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kubernetes Ingress - new-12
+# RULE 104: No spec.tls section (TLS terminated at load balancer)
+# RULE 105: ingressClassName: nginx with annotation
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-12
+  labels:
+    app: new-12
+    app.kubernetes.io/name: new-12
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: PLACEHOLDER_HOSTNAME
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-12
+                port:
+                  number: 80

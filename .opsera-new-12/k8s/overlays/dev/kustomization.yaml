@@ -1,0 +1,30 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kustomize Overlay - dev environment
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opsera-new-12-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+commonLabels:
+  environment: dev
+  tenant: opsera
+
+patches:
+  # Patch Ingress hostname
+  - target:
+      kind: Ingress
+      name: new-12
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: opsera-new-12-dev.agent.opsera.dev
+
+images:
+  - name: PLACEHOLDER_ECR_URI
+    newName: PLACEHOLDER_ECR_URI
+    newTag: latest
