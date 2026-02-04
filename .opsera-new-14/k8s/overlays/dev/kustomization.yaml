@@ -29,4 +29,4 @@ patches:
 images:
   - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-14
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-14
-    newTag: latest
+    newTag: 20260204195750-07b6f58
