@@ -21,7 +21,7 @@ spec:
     targetRevision: HEAD
     path: .opsera-new-13/k8s/overlays/dev
   destination:
-    server: https://kubernetes.default.svc
+    name: opsera-usw2-np
     namespace: opsera-new-13-dev
   syncPolicy:
     automated:
