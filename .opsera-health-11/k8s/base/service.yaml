@@ -1,0 +1,20 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kubernetes Service - health-11
+# RULE 23: ClusterIP type for internal access via Ingress
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-11
+  labels:
+    app: health-11
+    app.kubernetes.io/name: health-11
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: health-11

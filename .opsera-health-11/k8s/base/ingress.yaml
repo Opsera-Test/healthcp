@@ -1,0 +1,27 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kubernetes Ingress - health-11
+# RULE 104: No spec.tls section (TLS terminated at load balancer)
+# RULE 105: ingressClassName: nginx with annotation
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: health-11
+  labels:
+    app: health-11
+    app.kubernetes.io/name: health-11
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: PLACEHOLDER_HOSTNAME
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: health-11
+                port:
+                  number: 80

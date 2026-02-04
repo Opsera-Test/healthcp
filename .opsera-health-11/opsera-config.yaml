@@ -1,0 +1,45 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Opsera Code-to-Cloud Enterprise Configuration
+# Application: health-11
+# Generated: 2026-02-01
+# ════════════════════════════════════════════════════════════════════════════
+
+app:
+  name: health-11
+  tenant: opsera
+  type: frontend
+  framework: vite-react
+
+cloud:
+  provider: AWS
+  region: us-west-2
+  region_short: usw2
+
+cluster:
+  hub: argocd-usw2
+  spoke: opsera-usw2-np
+
+domain: agent.opsera.dev
+
+registry:
+  type: ECR
+  repository: opsera/health-11
+
+environments:
+  - name: dev
+    namespace: opsera-health-11-dev
+    hostname: opsera-health-11-dev.agent.opsera.dev
+    strategy: rolling
+    auto_promote: false
+    replicas: 1
+
+integrations:
+  security_scanning:
+    gitleaks: warn
+    grype: warn
+  sonarqube: skip
+  slack: skip
+  jira: skip
+  prometheus: skip
+  newrelic: skip
+  datadog: skip

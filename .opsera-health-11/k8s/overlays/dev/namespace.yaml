@@ -1,0 +1,14 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Kubernetes Namespace - dev environment
+# Pattern: {tenant}-{app}-{env}
+# ════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-health-11-dev
+  labels:
+    app: health-11
+    environment: dev
+    tenant: opsera
+    app.kubernetes.io/name: health-11
+    app.kubernetes.io/instance: health-11-dev
