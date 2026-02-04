@@ -139,6 +139,13 @@ jobs:
           ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
           echo "uri=${ECR_URI}" >> $GITHUB_OUTPUT
 
+      # RULE 143: Pull BEFORE making changes to avoid rebase conflicts
+      - name: Pull latest changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
       - name: Update kustomization with new tag
         run: |
           cd .opsera-${{ env.APP_NAME }}/k8s/overlays/dev
@@ -148,21 +155,15 @@ jobs:
           
           cat kustomization.yaml
 
-      # RULE 143: Git Rebase Pattern - always pull before push
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Pull latest changes first (RULE 143)
-          git pull --rebase origin main
-          
           git add -A
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "deploy: new-13-dev image ${{ needs.build-and-push.outputs.image_tag }}"
-            git push origin main
+            # Retry push with pull --rebase if it fails (handle race condition)
+            git push origin main || (git pull --rebase origin main && git push origin main)
           fi
 
   # ──────────────────────────────────────────────────────────────────────────
