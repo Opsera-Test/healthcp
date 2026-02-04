@@ -27,4 +27,4 @@ patches:
 images:
   - name: 
     newName: 
-    newTag: latest
+    newTag: 20260204185048-3691961
