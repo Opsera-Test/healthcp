@@ -27,6 +27,6 @@ patches:
         value: opsera-new-14-dev.agent.opsera.dev
 
 images:
-  - name: PLACEHOLDER_ECR_URI
-    newName: PLACEHOLDER_ECR_URI
+  - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-14
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-14
     newTag: latest

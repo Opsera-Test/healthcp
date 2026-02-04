@@ -27,7 +27,7 @@ spec:
         - name: ecr-credentials
       containers:
         - name: new-14
-          image: PLACEHOLDER_ECR_URI:latest
+          image: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-14:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

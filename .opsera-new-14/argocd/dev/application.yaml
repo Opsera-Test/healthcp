@@ -18,7 +18,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: PLACEHOLDER_REPO_URL
+    repoURL: https://github.com/opsera-agentic/healthcp.git
     targetRevision: HEAD
     path: .opsera-new-14/k8s/overlays/dev
   destination:
