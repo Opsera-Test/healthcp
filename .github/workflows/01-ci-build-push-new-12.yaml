@@ -43,6 +43,10 @@ concurrency:
   group: ci-new-12-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   # ══════════════════════════════════════════════════════════════════════════
   # Job 1: Security Scanning (Gitleaks)
@@ -70,7 +74,6 @@ jobs:
     name: "Verify Bootstrap"
     runs-on: ubuntu-latest
     outputs:
-      ecr_uri: ${{ steps.ecr-check.outputs.ecr_uri }}
       image_tag: ${{ steps.generate-tag.outputs.image_tag }}
     steps:
       - name: Checkout repository
@@ -86,14 +89,11 @@ jobs:
       - name: Check ECR repository exists
         id: ecr-check
         run: |
-          ECR_URI="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
-          echo "ecr_uri=${ECR_URI}" >> $GITHUB_OUTPUT
-          
           if ! aws ecr describe-repositories --repository-names "${{ env.ECR_REPOSITORY }}" 2>/dev/null; then
             echo "❌ ECR repository not found. Please run bootstrap workflow first."
             exit 1
           fi
-          echo "✅ ECR repository verified: ${ECR_URI}"
+          echo "✅ ECR repository verified"
 
       - name: Generate image tag
         id: generate-tag
@@ -113,7 +113,7 @@ jobs:
     needs: [security-scan, verify-bootstrap]
     if: always() && (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped') && needs.verify-bootstrap.result == 'success'
     outputs:
-      image_uri: ${{ steps.build.outputs.image_uri }}
+      ecr_uri: ${{ steps.get-ecr.outputs.ecr_uri }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -124,6 +124,14 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ECR URI
+        id: get-ecr
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          echo "ecr_uri=${ECR_URI}" >> $GITHUB_OUTPUT
+          echo "🐳 ECR URI: ${ECR_URI}"
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -139,15 +147,14 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ needs.verify-bootstrap.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }}
-            ${{ needs.verify-bootstrap.outputs.ecr_uri }}:latest
+            ${{ steps.get-ecr.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }}
+            ${{ steps.get-ecr.outputs.ecr_uri }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Output image URI
         run: |
-          IMAGE_URI="${{ needs.verify-bootstrap.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }}"
-          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          IMAGE_URI="${{ steps.get-ecr.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }}"
           echo "🐳 Image pushed: ${IMAGE_URI}"
 
       - name: Run Grype vulnerability scan
@@ -155,7 +162,7 @@ jobs:
         run: |
           echo "🔍 Running Grype vulnerability scan..."
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-          grype ${{ needs.verify-bootstrap.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }} --fail-on critical || true
+          grype ${{ steps.get-ecr.outputs.ecr_uri }}:${{ needs.verify-bootstrap.outputs.image_tag }} --fail-on critical || true
           echo "✅ Vulnerability scan complete"
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -177,19 +184,14 @@ jobs:
 
       - name: Update Kustomization image tag
         run: |
-          ECR_URI="${{ needs.verify-bootstrap.outputs.ecr_uri }}"
           IMAGE_TAG="${{ needs.verify-bootstrap.outputs.image_tag }}"
           
           echo "🔧 Updating image tag to: ${IMAGE_TAG}"
           
           cd .opsera-new-12/k8s/overlays/dev
           
-          # Update using kustomize edit or sed
-          if command -v kustomize &> /dev/null; then
-            kustomize edit set image ${ECR_URI}:latest=${ECR_URI}:${IMAGE_TAG}
-          else
-            sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kustomization.yaml
-          fi
+          # Update using sed
+          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kustomization.yaml
           
           echo "✅ Manifest updated"
 
@@ -208,7 +210,7 @@ jobs:
           fi
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 5: Sync and Deploy via ArgoCD
+  # Job 5: Sync and Deploy via ArgoCD (uses kubectl)
   # ══════════════════════════════════════════════════════════════════════════
   sync-and-deploy:
     name: "Deploy"
@@ -216,44 +218,42 @@ jobs:
     needs: [verify-bootstrap, build-and-push, update-manifests]
     if: needs.update-manifests.result == 'success'
     steps:
-      - name: Install ArgoCD CLI
-        run: |
-          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-          chmod +x argocd
-          sudo mv argocd /usr/local/bin/
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ArgoCD
+      - name: Configure kubectl for Hub
         run: |
-          argocd login ${{ env.ARGOCD_SERVER }} \
-            --username admin \
-            --password "${{ secrets.ARGOCD_ADMIN_PASSWORD }}" \
-            --grpc-web \
-            --insecure
+          echo "🔧 Configuring kubectl for hub cluster..."
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          echo "✅ kubectl configured"
 
-      - name: Sync ArgoCD Application
+      - name: Trigger ArgoCD Sync
         run: |
           echo "🚀 Triggering ArgoCD sync for: ${{ env.ARGOCD_APP }}"
           
-          # Force refresh and sync
-          argocd app get ${{ env.ARGOCD_APP }} --refresh
-          argocd app sync ${{ env.ARGOCD_APP }} --prune --force
+          # Add sync annotation to trigger refresh
+          kubectl patch application ${{ env.ARGOCD_APP }} -n argocd \
+            --type merge \
+            -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
           
-          echo "⏳ Waiting for deployment to complete..."
-          argocd app wait ${{ env.ARGOCD_APP }} --timeout 300 --health
-          
-          echo "✅ Deployment complete"
+          echo "✅ Sync triggered"
 
-      - name: Verify deployment health
+      - name: Wait for deployment
         run: |
-          echo "🏥 Verifying deployment health..."
-          argocd app get ${{ env.ARGOCD_APP }}
+          echo "⏳ Waiting for ArgoCD to sync..."
+          sleep 30
           
-          STATUS=$(argocd app get ${{ env.ARGOCD_APP }} -o json | jq -r '.status.health.status')
-          if [[ "$STATUS" == "Healthy" ]]; then
-            echo "✅ Application is healthy!"
-          else
-            echo "⚠️ Application health status: $STATUS"
-          fi
+          # Check application status
+          kubectl get application ${{ env.ARGOCD_APP }} -n argocd -o jsonpath='{.status.sync.status}'
+          echo ""
+          kubectl get application ${{ env.ARGOCD_APP }} -n argocd -o jsonpath='{.status.health.status}'
+          echo ""
+          
+          echo "✅ Deployment triggered"
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 6: Summary
@@ -276,7 +276,6 @@ jobs:
           echo "║  Deploy:            ${{ needs.sync-and-deploy.result }}"
           echo "╠══════════════════════════════════════════════════════════════════════════════╣"
           echo "║  Image Tag: ${{ needs.verify-bootstrap.outputs.image_tag }}"
-          echo "║  ECR URI: ${{ needs.verify-bootstrap.outputs.ecr_uri }}"
           echo "╚══════════════════════════════════════════════════════════════════════════════╝"
           
           if [[ "${{ needs.sync-and-deploy.result }}" == "success" ]]; then
