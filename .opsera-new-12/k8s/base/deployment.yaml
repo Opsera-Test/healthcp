@@ -27,7 +27,7 @@ spec:
         - name: ecr-credentials
       containers:
         - name: new-12
-          image: PLACEHOLDER_ECR_URI:latest
+          image: :latest
           imagePullPolicy: Always
           ports:
             - name: http

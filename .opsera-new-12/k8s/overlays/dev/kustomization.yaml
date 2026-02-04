@@ -25,6 +25,6 @@ patches:
         value: opsera-new-12-dev.agent.opsera.dev
 
 images:
-  - name: PLACEHOLDER_ECR_URI
-    newName: PLACEHOLDER_ECR_URI
+  - name: 
+    newName: 
     newTag: latest
