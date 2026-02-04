@@ -27,7 +27,7 @@ spec:
         - name: ecr-credentials
       containers:
         - name: new-12
-          image: :latest
+          image: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-12:latest
           imagePullPolicy: Always
           ports:
             - name: http
