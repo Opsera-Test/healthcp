@@ -148,16 +148,21 @@ jobs:
           
           cat kustomization.yaml
 
+      # RULE 143: Git Rebase Pattern - always pull before push
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Pull latest changes first (RULE 143)
+          git pull --rebase origin main
+          
           git add -A
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "deploy: new-13-dev image ${{ needs.build-and-push.outputs.image_tag }}"
-            git push
+            git push origin main
           fi
 
   # ──────────────────────────────────────────────────────────────────────────
