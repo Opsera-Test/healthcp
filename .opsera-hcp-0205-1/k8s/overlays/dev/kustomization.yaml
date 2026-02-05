@@ -10,22 +10,21 @@ kind: Kustomization
 namespace: opsera-hcp-0205-1-dev
 
 resources:
-  - ../../base
-  - namespace.yaml
-  - ingress.yaml
+- ../../base
+- namespace.yaml
+- ingress.yaml
 
 # RULE 106: Use labels with includeSelectors: false to avoid selector mismatch
 labels:
-  - pairs:
-      environment: dev
-      tenant: opsera
-    includeSelectors: false
+- pairs:
+    environment: dev
+    tenant: opsera
 
 images:
-  - name: hcp-0205-1
-    newName: PLACEHOLDER_ECR_URI/opsera/hcp-0205-1
-    newTag: latest
+- name: hcp-0205-1
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0205-1
+  newTag: ec0dea4-20260205234802
 
 replicas:
-  - name: hcp-0205-1
-    count: 1
+- count: 1
+  name: hcp-0205-1
