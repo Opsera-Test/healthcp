@@ -11,7 +11,7 @@ region_short: usw2
 
 # Cluster Configuration
 hub_cluster: argocd-usw2
-spoke_cluster: opsera-usw2-np
+spoke_cluster: cluster-opsera-usw2-np
 argocd_server: argocd-usw2.agent.opsera.dev
 
 # Domain Configuration (RULE 64)
