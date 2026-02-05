@@ -196,6 +196,7 @@ jobs:
           resources:
             - ../../base
             - namespace.yaml
+            - ingress.yaml
 
           labels:
             - pairs:
