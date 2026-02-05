@@ -13,8 +13,7 @@ metadata:
     environment: dev
     tenant: opsera
   annotations:
-    kubernetes.io/ingress.class: "nginx"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     external-dns.alpha.kubernetes.io/hostname: "opsera-healthcp-dev.agent.opsera.dev"
 spec:
@@ -30,7 +29,3 @@ spec:
                 name: healthcp
                 port:
                   number: 80
-  tls:
-    - hosts:
-        - opsera-healthcp-dev.agent.opsera.dev
-      secretName: wildcard-agent-opsera-dev-tls
