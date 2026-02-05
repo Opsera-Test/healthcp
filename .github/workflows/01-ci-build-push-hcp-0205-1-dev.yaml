@@ -181,6 +181,7 @@ jobs:
         with:
           sarif_file: results.sarif
           category: gitleaks
+        continue-on-error: true  # Don't fail build if SARIF upload fails (org permissions)
 
   # ═══════════════════════════════════════════════════════════════════════════
   # STAGE 3: Quality Gates - SonarQube (Skipped in Quick Setup)
@@ -281,6 +282,7 @@ jobs:
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
+        continue-on-error: true  # Don't fail build if SARIF upload fails (org permissions)
 
       - name: Push to ECR
         id: push
