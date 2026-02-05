@@ -20,7 +20,7 @@ labels:
 
 images:
   - name: IMAGE_PLACEHOLDER
-    newName: PLACEHOLDER_ECR_URI/opsera/new-16
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/new-16
     newTag: latest
 
 replicas:
