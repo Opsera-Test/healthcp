@@ -11,6 +11,7 @@ namespace: opsera-healthcp-dev
 resources:
   - ../../base
   - namespace.yaml
+  - ingress.yaml
 
 labels:
   - pairs:
