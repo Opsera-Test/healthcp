@@ -36,7 +36,7 @@ env:
   AWS_REGION: us-west-2
   HUB_CLUSTER: argocd-usw2
   EKS_SPOKE_CLUSTER: opsera-usw2-np
-  ARGOCD_DESTINATION: cluster-opsera-usw2-np
+  ARGOCD_DESTINATION: opsera-usw2-np
   DOMAIN: agent.opsera.dev
 
 # RULE 148: Required permissions for git operations

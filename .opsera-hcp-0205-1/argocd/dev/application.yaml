@@ -23,7 +23,7 @@ spec:
   destination:
     # RULE 149: Use destination.name for hub-spoke architecture
     # NEVER use destination.server: https://kubernetes.default.svc
-    name: cluster-opsera-usw2-np
+    name: opsera-usw2-np
     namespace: opsera-hcp-0205-1-dev
   syncPolicy:
     automated:
