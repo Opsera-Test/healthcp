@@ -23,7 +23,7 @@ labels:
 images:
 - name: hcp-0205-1
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0205-1
-  newTag: 2883174-20260205235929
+  newTag: 64ed314-20260206000342
 
 replicas:
 - count: 1
