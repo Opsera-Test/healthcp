@@ -138,6 +138,21 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
+      - name: Create ECR pull secret on spoke cluster
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region ${{ env.AWS_REGION }}
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          ECR_TOKEN=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+          kubectl create namespace opsera-hcp-0207-dev --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret docker-registry ecr-pull-secret \
+            --docker-server="${ECR_REGISTRY}" \
+            --docker-username=AWS \
+            --docker-password="${ECR_TOKEN}" \
+            --namespace=opsera-hcp-0207-dev \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ ECR pull secret refreshed in opsera-hcp-0207-dev"
+
       - name: Apply ArgoCD Application and trigger sync
         run: |
           aws eks update-kubeconfig --name argocd-usw2 --region ${{ env.AWS_REGION }}

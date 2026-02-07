@@ -12,6 +12,8 @@ spec:
       labels:
         app: hcp-0207
     spec:
+      imagePullSecrets:
+        - name: ecr-pull-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
