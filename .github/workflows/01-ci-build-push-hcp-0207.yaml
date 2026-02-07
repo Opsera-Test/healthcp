@@ -138,11 +138,12 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      - name: Trigger ArgoCD sync
+      - name: Apply ArgoCD Application and trigger sync
         run: |
           aws eks update-kubeconfig --name argocd-usw2 --region ${{ env.AWS_REGION }}
+          kubectl apply -f ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}/application.yaml -n argocd
           kubectl annotate application hcp-0207-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
-          echo "✅ ArgoCD sync triggered"
+          echo "✅ ArgoCD Application applied and sync triggered"
     continue-on-error: true
 
   summary:
