@@ -8,7 +8,7 @@ resources:
 images:
   - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0207
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0207
-    newTag: cdaf468
+    newTag: 30b6675
 replicas:
   - name: hcp-0207
     count: 1
