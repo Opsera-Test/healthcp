@@ -6,9 +6,9 @@ resources:
   - namespace.yaml
   - ingress.yaml
 images:
-  - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0207
-    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0207
-    newTag: d809581
+  - name: PLACEHOLDER_ECR_URI
+    newName: PLACEHOLDER_ECR_URI
+    newTag: latest
 replicas:
   - name: hcp-0207
     count: 1
