@@ -159,6 +159,27 @@ jobs:
           kubectl apply -f ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}/application.yaml -n argocd
           kubectl annotate application hcp-0207-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
           echo "✅ ArgoCD Application applied and sync triggered"
+
+      - name: Get spoke LoadBalancer hostname (for hub Ingress)
+        id: spoke_lb
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region ${{ env.AWS_REGION }}
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            HOST=$(kubectl get svc hcp-0207 -n opsera-hcp-0207-dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            if [ -n "$HOST" ]; then echo "hostname=$HOST" >> $GITHUB_OUTPUT; echo "✅ Spoke LB: $HOST"; exit 0; fi
+            echo "Waiting for LoadBalancer hostname... ($i/10)"
+            sleep 15
+          done
+          echo "hostname=" >> $GITHUB_OUTPUT
+
+      - name: Apply hub Ingress (route to spoke LB – fix default backend 404)
+        if: steps.spoke_lb.outputs.hostname != ''
+        run: |
+          aws eks update-kubeconfig --name argocd-usw2 --region ${{ env.AWS_REGION }}
+          kubectl apply -f ${{ env.OPSERA_FOLDER }}/hub-ingress/namespace.yaml
+          sed "s|PLACEHOLDER_SPOKE_LB_HOSTNAME|${{ steps.spoke_lb.outputs.hostname }}|g" \
+            ${{ env.OPSERA_FOLDER }}/hub-ingress/service-externalname.yaml.tpl | kubectl apply -f -
+          echo "✅ Hub Ingress applied (backend: ${{ steps.spoke_lb.outputs.hostname }})"
     continue-on-error: true
 
   summary:
