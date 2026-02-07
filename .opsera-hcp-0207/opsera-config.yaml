@@ -1,0 +1,32 @@
+# Opsera Code-to-Cloud Enterprise - Quick Setup
+# App: hcp-0207 | AWS us-west-2 | Tenant: opsera
+app_name: hcp-0207
+tenant: opsera
+cloud_provider: aws
+region: us-west-2
+region_short: usw2
+environment: dev
+
+# Hub-Spoke ArgoCD (RULE 149: use destination.name for spoke)
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+argocd_server: argocd-usw2.agent.opsera.dev
+domain: agent.opsera.dev
+
+# Namespace: {tenant}-{app}-{env}
+namespace: opsera-hcp-0207-dev
+hostname: opsera-hcp-0207-dev.agent.opsera.dev
+
+# Runtime (detected)
+runtime: nodejs
+framework: vite
+port: 8080
+architecture: frontend_only
+
+# Quick Setup defaults
+deployment_strategy:
+  dev: rolling
+integrations:
+  security_scanning: warn
+  sonarqube: skip
+  slack: skip

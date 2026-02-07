@@ -1,0 +1,102 @@
+# Bootstrap: ECR + ArgoCD Application for hcp-0207 (one-time)
+# Run once before first CI/CD deploy. Uses GH_PAT for private repo.
+name: Bootstrap hcp-0207
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Application name'
+        required: true
+        default: 'hcp-0207'
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+      aws_region:
+        description: 'AWS region'
+        required: true
+        default: 'us-west-2'
+
+env:
+  APP_NAME: ${{ github.event.inputs.app_name || 'hcp-0207' }}
+  ENV: ${{ github.event.inputs.environment || 'dev' }}
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-west-2' }}
+  OPSERA_FOLDER: .opsera-hcp-0207
+  NAMESPACE: opsera-hcp-0207-dev
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  create-ecr:
+    name: Create ECR repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: Create ECR (or use credentials)
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws configure set region ${{ env.AWS_REGION }}
+          fi
+          REPO_NAME="opsera/hcp-0207"
+          aws ecr describe-repositories --repository-names "$REPO_NAME" --region ${{ env.AWS_REGION }} 2>/dev/null || \
+          aws ecr create-repository --repository-name "$REPO_NAME" --region ${{ env.AWS_REGION }}
+          echo "✅ ECR repository ready: $REPO_NAME"
+
+  apply-argocd-app:
+    name: Apply ArgoCD Application
+    runs-on: ubuntu-latest
+    needs: [create-ecr]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+        continue-on-error: true
+
+      - name: Get workload cluster endpoint
+        id: cluster
+        run: |
+          WORKLOAD_URL=$(aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} --query 'cluster.endpoint' --output text 2>/dev/null || echo "")
+          echo "workload_url=${WORKLOAD_URL}" >> $GITHUB_OUTPUT
+          if [ -z "$WORKLOAD_URL" ]; then
+            echo "⚠️ Spoke cluster ${{ env.SPOKE_CLUSTER }} not found. Apply ArgoCD Application manually when cluster exists."
+          fi
+
+      - name: Apply ArgoCD Application to hub
+        if: steps.cluster.outputs.workload_url != ''
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl apply -f ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}/application.yaml -n argocd
+          kubectl annotate application hcp-0207-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
+          echo "✅ ArgoCD Application hcp-0207-dev applied"
+    continue-on-error: true
+
+  summary:
+    name: Bootstrap summary
+    runs-on: ubuntu-latest
+    needs: [create-ecr, apply-argocd-app]
+    steps:
+      - run: |
+          echo "## Bootstrap complete for hcp-0207" >> $GITHUB_STEP_SUMMARY
+          echo "- ECR: opsera/hcp-0207 (region ${{ env.AWS_REGION }})" >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD App: hcp-0207-dev → namespace opsera-hcp-0207-dev" >> $GITHUB_STEP_SUMMARY
+          echo "- Next: Run CI/CD workflow (push to main or trigger 01-ci-build-push-hcp-0207.yaml)" >> $GITHUB_STEP_SUMMARY

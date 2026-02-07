@@ -1,0 +1,38 @@
+# ArgoCD Application - hcp-0207 dev
+# RULE 149: destination uses spoke cluster name, NOT kubernetes.default.svc
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hcp-0207-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/opsera-agentic/healthcp.git
+    targetRevision: main
+    path: .opsera-hcp-0207/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-hcp-0207-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 30s
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

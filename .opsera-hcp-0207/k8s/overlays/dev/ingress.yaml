@@ -1,0 +1,21 @@
+# RULE 83-84: HTTP-only Ingress (no TLS/cert-manager in manifest)
+# RULE 105: BOTH ingressClassName AND kubernetes.io/ingress.class
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hcp-0207
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: opsera-hcp-0207-dev.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hcp-0207
+                port:
+                  number: 80

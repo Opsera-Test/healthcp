@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hcp-0207
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: opsera-hcp-0207-dev.agent.opsera.dev
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+spec:
+  type: LoadBalancer
+  selector:
+    app: hcp-0207
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
+      protocol: TCP
