@@ -160,6 +160,22 @@ jobs:
           kubectl annotate application hcp-0207-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite
           echo "✅ ArgoCD Application applied and sync triggered"
 
+      - name: Wait for ArgoCD sync (clear Unknown status)
+        run: |
+          aws eks update-kubeconfig --name argocd-usw2 --region ${{ env.AWS_REGION }}
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            SYNC=$(kubectl get application hcp-0207-dev -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH=$(kubectl get application hcp-0207-dev -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "[$i/12] sync=$SYNC health=$HEALTH"
+            if [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+              echo "✅ ArgoCD Synced and Healthy"
+              exit 0
+            fi
+            kubectl annotate application hcp-0207-dev -n argocd argocd.argoproj.io/refresh=hard --overwrite 2>/dev/null || true
+            sleep 10
+          done
+          echo "⚠️ ArgoCD not Synced/Healthy within 2 min; continuing anyway"
+
       - name: Get spoke LoadBalancer hostname (for hub Ingress)
         id: spoke_lb
         run: |
