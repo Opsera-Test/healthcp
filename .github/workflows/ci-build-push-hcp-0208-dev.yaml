@@ -117,7 +117,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No manifest changes"
           else
-            git commit -m "chore(ci): update image tag to ${{ needs.build-push.outputs.image_tag }}"
+            git commit -m "chore(ci): update image tag to ${{ needs.build-push.outputs.image_tag }} [skip ci]"
             git push origin main
           fi
 
