@@ -1,5 +1,15 @@
 [
   {
+    "timestamp": "2026-02-08T180803",
+    "commit": "efe966c",
+    "environment": "dev",
+    "status": "LIVE",
+    "health": "Healthy",
+    "syncStatus": "Synced",
+    "landscapeFile": "landscapes/2026-02-08T180803.md",
+    "url": "https://hcp-0208-dev.agent.opsera.dev"
+  },
+  {
     "timestamp": "2026-02-08T120853",
     "commit": "86ff916",
     "environment": "dev",
