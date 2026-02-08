@@ -1,0 +1,48 @@
+# Apply ArgoCD Application - hcp-0208-dev
+# Run once with HUB_KUBECONFIG_B64 set to create/sync the app so the endpoint works.
+# Hub = cluster where ArgoCD runs (argocd-usw2). App syncs to spoke opsera-usw2-np.
+
+name: Apply ArgoCD Application (hcp-0208)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_NAME: hcp-0208
+  OPSERA_FOLDER: .opsera-hcp-0208
+
+jobs:
+  apply:
+    name: Apply Application to hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply ArgoCD Application (requires HUB_KUBECONFIG_B64)
+        env:
+          HUB_KUBECONFIG_B64: ${{ secrets.HUB_KUBECONFIG_B64 }}
+        run: |
+          if [ -z "$HUB_KUBECONFIG_B64" ]; then
+            echo "::error::Add repo secret HUB_KUBECONFIG_B64 (base64 kubeconfig for ArgoCD hub cluster) and re-run."
+            echo "Then the endpoint https://hcp-0208-dev.agent.opsera.dev will work after sync."
+            exit 1
+          fi
+          echo "$HUB_KUBECONFIG_B64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl apply -f ${{ env.OPSERA_FOLDER }}/argocd/dev/application.yaml
+          echo "Application applied. ArgoCD will sync to spoke (opsera-usw2-np)."
+          kubectl get application hcp-0208-dev -n argocd 2>/dev/null || true
+
+      - name: Endpoint
+        run: |
+          echo "## Endpoint (after ArgoCD sync)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**https://hcp-0208-dev.agent.opsera.dev**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Allow 1–2 minutes for sync and pod startup, then refresh." >> $GITHUB_STEP_SUMMARY
