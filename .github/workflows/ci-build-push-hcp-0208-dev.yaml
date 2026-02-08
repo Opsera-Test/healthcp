@@ -60,10 +60,10 @@ jobs:
           ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}"
           echo "uri=${ECR_URI}" >> $GITHUB_OUTPUT
 
-      - name: Set image tag
+      - name: Set image tag (RULE 175 - immutable: ENV-SHA-timestamp)
         id: meta
         run: |
-          TAG="${GITHUB_SHA::7}"
+          TAG="${{ env.ENV }}-${GITHUB_SHA::8}-$(date +%Y%m%d%H%M%S)"
           echo "tags=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Login to ECR
@@ -157,6 +157,25 @@ jobs:
     needs: [update-manifests, sync-argocd]
     runs-on: ubuntu-latest
     steps:
+      - name: Health check via port-forward (RULE 168)
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+        continue-on-error: true
+        run: |
+          if [ -z "$KUBECONFIG_B64" ]; then echo "KUBECONFIG_B64 not set – skip port-forward"; exit 0; fi
+          echo "$KUBECONFIG_B64" | base64 -d > kubeconfig
+          chmod 600 kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl config use-context ${{ env.SPOKE_CLUSTER }} 2>/dev/null || true
+          POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.APP_NAME }} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
+          if [ -n "$POD" ]; then
+            kubectl port-forward -n ${{ env.NAMESPACE }} "$POD" 8081:8080 &
+            sleep 3
+            wget -qO- --timeout=5 http://localhost:8081/ >/dev/null && echo "Port-forward health check OK" || true
+          else
+            echo "No pod found in ${{ env.NAMESPACE }} – skip port-forward"
+          fi
+
       - name: Wait for endpoint (retry up to 5 times, 30s apart)
         id: endpoint
         continue-on-error: true

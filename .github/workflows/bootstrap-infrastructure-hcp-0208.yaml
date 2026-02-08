@@ -122,17 +122,7 @@ jobs:
             - dev
           CONFIG
 
-  create-base-manifests:
-    name: Create K8s Base Manifests
-    needs: update-config-files
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT }}
-
-      - name: Write base deployment
+      - name: Write base deployment (RULE 79: SPA health path /)
         run: |
           cat > ${{ env.OPSERA_FOLDER }}/k8s/base/deployment.yaml << 'DEPLOY'
           apiVersion: apps/v1
@@ -162,13 +152,13 @@ jobs:
                     imagePullPolicy: Always
                     livenessProbe:
                       httpGet:
-                        path: /health
+                        path: /
                         port: 8080
                       initialDelaySeconds: 10
                       periodSeconds: 10
                     readinessProbe:
                       httpGet:
-                        path: /health
+                        path: /
                         port: 8080
                       initialDelaySeconds: 5
                       periodSeconds: 5
@@ -216,7 +206,7 @@ jobs:
 
   create-ecr-pull-secret:
     name: Create ECR Pull Secret
-    needs: create-base-manifests
+    needs: update-config-files
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
@@ -251,7 +241,7 @@ jobs:
 
   apply-argocd-application:
     name: Apply ArgoCD Application
-    needs: [create-base-manifests, register-argocd-repo]
+    needs: [update-config-files, register-argocd-repo]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
