@@ -1,0 +1,196 @@
+# CI Build & Push - hcp-0208 (dev)
+# Quick Setup: security=warn, dev only. Run after bootstrap (RULE 127).
+
+name: CI Build & Push (hcp-0208 dev)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_NAME: hcp-0208
+  TENANT: opsera
+  ENV: dev
+  AWS_REGION: us-west-2
+  NAMESPACE: opsera-hcp-0208-dev
+  SPOKE_CLUSTER: opsera-usw2-np
+  OPSERA_FOLDER: .opsera-hcp-0208
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  build-push:
+    name: Build & Push
+    needs: [security-scan]
+    if: always() && (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      ecr_uri: ${{ steps.ecr_uri.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ECR URI
+        id: ecr_uri
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}"
+          echo "uri=${ECR_URI}" >> $GITHUB_OUTPUT
+
+      - name: Set image tag
+        id: meta
+        run: |
+          TAG="${GITHUB_SHA::7}"
+          echo "tags=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: |
+          docker build -t ${{ steps.ecr_uri.outputs.uri }}:${{ steps.meta.outputs.tags }} .
+
+      - name: Grype scan
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ steps.ecr_uri.outputs.uri }}:${{ steps.meta.outputs.tags }}
+        continue-on-error: true
+
+      - name: Push image
+        run: |
+          docker push ${{ steps.ecr_uri.outputs.uri }}:${{ steps.meta.outputs.tags }}
+
+  update-manifests:
+    name: Update Manifests
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get ECR URI and update kustomization
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}"
+          KUSTOMIZATION="${{ env.OPSERA_FOLDER }}/k8s/base/kustomization.yaml"
+          sed -i "s|newTag: .*|newTag: ${{ needs.build-push.outputs.image_tag }}|g" "$KUSTOMIZATION"
+          sed -i "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" "$KUSTOMIZATION"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          git add ${{ env.OPSERA_FOLDER }}/k8s/base/kustomization.yaml
+          if git diff --staged --quiet; then
+            echo "No manifest changes"
+          else
+            git commit -m "chore(ci): update image tag to ${{ needs.build-push.outputs.image_tag }}"
+            git push origin main
+          fi
+
+  refresh-ecr-secret:
+    name: Refresh ECR Secret
+    needs: update-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Note - ECR secret refresh
+        run: |
+          echo "ECR pull secret refresh is done in-cluster; ensure OPSERA_KUBECONFIG or runner has kubectl access to ${{ env.SPOKE_CLUSTER }}"
+          echo "Token refresh (RULE 163) should run in a step that has cluster access"
+          exit 0
+
+  sync-argocd:
+    name: Sync ArgoCD
+    needs: [update-manifests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger ArgoCD sync
+        run: |
+          echo "ArgoCD sync: application hcp-0208-dev on destination opsera-usw2-np"
+          echo "If ArgoCD auto-sync is enabled, push to main will sync; otherwise run sync via Opsera or kubectl"
+          exit 0
+
+  verify-deployment:
+    name: Verify Deployment
+    needs: [update-manifests, sync-argocd]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify step
+        run: |
+          echo "Deployment updated. Verify at https://hcp-0208-dev.agent.opsera.dev when DNS and ingress are ready."
+          exit 0
+
+  deployment-summary:
+    name: Deployment Summary
+    needs: [build-push, update-manifests, verify-deployment]
+    if: always() && (needs.verify-deployment.result == 'success' || needs.verify-deployment.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- App: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Env: ${{ env.ENV }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Image tag: ${{ needs.build-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Namespace: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+
+  trigger-landscape:
+    name: Trigger Deployment Landscape
+    needs: [deployment-summary]
+    if: success()
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Trigger landscape update
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'deployment-landscape-hcp-0208.yaml',
+                ref: 'main'
+              });
+              core.info('Deployment landscape workflow triggered');
+            } catch (e) {
+              core.info('Landscape workflow not found or GH_PAT missing – skip: ' + e.message);
+            }

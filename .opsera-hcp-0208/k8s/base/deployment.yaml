@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hcp-0208
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hcp-0208
+  template:
+    metadata:
+      labels:
+        app: hcp-0208
+    spec:
+      runAsNonRoot: true
+      runAsUser: 101
+      runAsGroup: 101
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: app
+          image: PLACEHOLDER_ECR_URI:latest
+          ports:
+            - containerPort: 8080
+          imagePullPolicy: Always
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5

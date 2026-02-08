@@ -1,0 +1,60 @@
+# Diagnostics - hcp-0208
+# Run to debug deployment, pods, ArgoCD sync (RULE 67). Use from Actions tab.
+
+name: Diagnostics (hcp-0208)
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment'
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+
+env:
+  APP_NAME: hcp-0208
+  TENANT: opsera
+  SPOKE_CLUSTER: opsera-usw2-np
+  NAMESPACE: opsera-hcp-0208-dev
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnostics:
+    name: Run diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Diagnostic summary
+        run: |
+          echo "## Diagnostics Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Namespace | ${{ env.NAMESPACE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Spoke cluster | ${{ env.SPOKE_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ArgoCD server | argocd-usw2.agent.opsera.dev |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checks (run with cluster access)" >> $GITHUB_STEP_SUMMARY
+          echo "- Pods: \`kubectl get pods -n ${{ env.NAMESPACE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment: \`kubectl get deployment -n ${{ env.NAMESPACE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ArgoCD app: \`argocd app get hcp-0208-dev --server argocd-usw2.agent.opsera.dev\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Ingress: \`kubectl get ingress -n ${{ env.NAMESPACE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- URL: https://hcp-0208-dev.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify manifest files
+        run: |
+          echo "Manifest paths:"
+          ls -la .opsera-hcp-0208/k8s/base/ || true
+          ls -la .opsera-hcp-0208/k8s/overlays/dev/ || true
+          echo "---"
+          echo "Base kustomization image:"
+          grep -A2 "images:" .opsera-hcp-0208/k8s/base/kustomization.yaml || true

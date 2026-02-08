@@ -1,0 +1,301 @@
+# Bootstrap Infrastructure - hcp-0208
+# Run FIRST before any CI/CD (RULE 127). Creates ECR, .opsera config, ArgoCD app.
+# Quick Setup: AWS us-west-2, tenant opsera, dev only.
+
+name: Bootstrap Infrastructure (hcp-0208)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_bootstrap:
+        description: 'Type "yes" to run bootstrap'
+        required: true
+        default: 'no'
+
+env:
+  APP_NAME: hcp-0208
+  TENANT: opsera
+  ENV: dev
+  AWS_REGION: us-west-2
+  REGION_SHORT: usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  HUB_CLUSTER: argocd-usw2
+  ARGOCD_SERVER: argocd-usw2.agent.opsera.dev
+  OPSERA_FOLDER: .opsera-hcp-0208
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  setup-ecr:
+    name: Setup ECR Repository
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_uri: ${{ steps.ecr.outputs.uri }}
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get AWS Account ID
+        id: account
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create ECR repository if not exists
+        id: ecr
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.APP_NAME }} 2>/dev/null || \
+          aws ecr create-repository --repository-name ${{ env.APP_NAME }} --image-scanning-configuration scanOnPush=true
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "uri=${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}" >> $GITHUB_OUTPUT
+
+  create-opsera-config:
+    name: Create Opsera Config Folder
+    needs: setup-ecr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Create directory structure
+        run: |
+          mkdir -p ${{ env.OPSERA_FOLDER }}/k8s/base
+          mkdir -p ${{ env.OPSERA_FOLDER }}/k8s/overlays/${{ env.ENV }}
+          mkdir -p ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}
+
+  update-config-files:
+    name: Update Configuration Files
+    needs: create-opsera-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Create base kustomization
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/k8s/base/kustomization.yaml << 'KUSTOMBASE'
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+            - deployment.yaml
+            - service.yaml
+            - ingress.yaml
+          images:
+            - name: PLACEHOLDER_ECR_URI:latest
+              newName: PLACEHOLDER_ECR_URI
+              newTag: latest
+          KUSTOMBASE
+
+      - name: Create dev overlay kustomization
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/k8s/overlays/${{ env.ENV }}/kustomization.yaml << 'KUSTOMOVERLAY'
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          namespace: opsera-hcp-0208-dev
+          resources:
+            - ../../base
+          KUSTOMOVERLAY
+
+      - name: Create opsera-config.yaml
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/opsera-config.yaml << 'CONFIG'
+          app_name: hcp-0208
+          tenant: opsera
+          region: us-west-2
+          region_short: usw2
+          spoke_cluster: opsera-usw2-np
+          hub_cluster: argocd-usw2
+          argocd_server: argocd-usw2.agent.opsera.dev
+          domain: agent.opsera.dev
+          environments:
+            - dev
+          CONFIG
+
+  create-base-manifests:
+    name: Create K8s Base Manifests
+    needs: update-config-files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Write base deployment
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/k8s/base/deployment.yaml << 'DEPLOY'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: hcp-0208
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: hcp-0208
+            template:
+              metadata:
+                labels:
+                  app: hcp-0208
+              spec:
+                runAsNonRoot: true
+                runAsUser: 101
+                runAsGroup: 101
+                imagePullSecrets:
+                  - name: ecr-pull-secret
+                containers:
+                  - name: app
+                    image: PLACEHOLDER_ECR_URI:latest
+                    ports:
+                      - containerPort: 8080
+                    imagePullPolicy: Always
+                    livenessProbe:
+                      httpGet:
+                        path: /health
+                        port: 8080
+                      initialDelaySeconds: 10
+                      periodSeconds: 10
+                    readinessProbe:
+                      httpGet:
+                        path: /health
+                        port: 8080
+                      initialDelaySeconds: 5
+                      periodSeconds: 5
+                  DEPLOY
+
+      - name: Write base service
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/k8s/base/service.yaml << 'SVC'
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: hcp-0208
+          spec:
+            selector:
+              app: hcp-0208
+            ports:
+              - port: 80
+                targetPort: 8080
+                name: http
+          SVC
+
+      - name: Write base ingress
+        run: |
+          cat > ${{ env.OPSERA_FOLDER }}/k8s/base/ingress.yaml << 'ING'
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: hcp-0208
+            annotations:
+              kubernetes.io/ingress.class: nginx
+          spec:
+            ingressClassName: nginx
+            rules:
+              - host: hcp-0208-dev.agent.opsera.dev
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: hcp-0208
+                          port:
+                            number: 80
+          ING
+
+  create-ecr-pull-secret:
+    name: Create ECR Pull Secret
+    needs: create-base-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create namespace and ECR pull secret
+        run: |
+          # Get kubeconfig (assumes OPSERA_KUBECONFIG or similar is set for spoke)
+          # For bootstrap we document that user must have cluster access; secret creation can be in CI/CD
+          echo "ECR pull secret creation runs in CI/CD deploy job with fresh token (RULE 163)"
+          exit 0
+
+  register-argocd-repo:
+    name: Register Repository with ArgoCD
+    needs: create-ecr-pull-secret
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Register ArgoCD repo secret (placeholder - requires cluster access)
+        run: |
+          echo "ArgoCD repo registration requires hub cluster access; use Opsera runbooks or run manually once"
+          echo "Repository URL: https://github.com/${{ github.repository }}"
+          exit 0
+
+  apply-argocd-application:
+    name: Apply ArgoCD Application
+    needs: [create-base-manifests, register-argocd-repo]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Write ArgoCD Application manifest
+        run: |
+          mkdir -p ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}
+          cat > ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}/application.yaml << 'ARGO'
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: hcp-0208-dev
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: https://github.com/REPO_PLACEHOLDER
+              path: .opsera-hcp-0208/k8s/overlays/dev
+              targetRevision: main
+            destination:
+              name: opsera-usw2-np
+              namespace: opsera-hcp-0208-dev
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - Replace=true
+          ARGO
+          sed -i "s|REPO_PLACEHOLDER|${{ github.repository }}|g" ${{ env.OPSERA_FOLDER }}/argocd/${{ env.ENV }}/application.yaml
+
+      - name: Commit and push Opsera config
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add ${{ env.OPSERA_FOLDER }}
+          git status
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: add Opsera bootstrap config for hcp-0208 (dev)"
+            git push origin main
+          fi
