@@ -83,9 +83,28 @@ jobs:
         run: |
           docker push ${{ steps.ecr_uri.outputs.uri }}:${{ steps.meta.outputs.tags }}
 
+  pre-deploy-validate:
+    name: Pre-deploy validate
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kustomize
+        run: |
+          curl -sLO "https://github.com/kubernetes-sigs/kustomize/releases/latest/download/kustomize_latest_linux_amd64.tar.gz"
+          tar xzf kustomize_latest_linux_amd64.tar.gz && chmod +x kustomize && sudo mv kustomize /usr/local/bin/
+      - name: Run pre-deploy validation
+        uses: ./.github/actions/pre-deploy-validate
+        with:
+          app_name: ${{ env.APP_NAME }}
+          tenant: ${{ env.TENANT }}
+          env: ${{ env.ENV }}
+          opsera_folder: ${{ env.OPSERA_FOLDER }}
+          spoke_cluster: ${{ env.SPOKE_CLUSTER }}
+
   update-manifests:
     name: Update Manifests
-    needs: build-push
+    needs: [build-push, pre-deploy-validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -219,25 +238,8 @@ jobs:
           echo "- Namespace: ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
 
   trigger-landscape:
-    name: Trigger Deployment Landscape
+    name: Deployment Landscape
     needs: [deployment-summary]
     if: success()
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - name: Trigger landscape update
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_PAT }}
-          script: |
-            try {
-              await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'deployment-landscape-hcp-0208.yaml',
-                ref: 'main'
-              });
-              core.info('Deployment landscape workflow triggered');
-            } catch (e) {
-              core.info('Landscape workflow not found or GH_PAT missing – skip: ' + e.message);
-            }
+    uses: ./.github/workflows/deployment-landscape-hcp-0208.yaml
+    secrets: inherit
