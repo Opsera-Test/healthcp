@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: opsera-hcp-0207-dev
-  labels:
-    app: hcp-0207
-    app.kubernetes.io/name: hcp-0207
