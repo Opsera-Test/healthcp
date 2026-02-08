@@ -7,4 +7,4 @@ resources:
 images:
   - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/hcp-0208:latest
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/hcp-0208
-    newTag: 7f7f8b5
+    newTag: 4b74e30
