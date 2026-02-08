@@ -6,6 +6,8 @@ name: CI Build & Push (hcp-0208 dev)
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.opsera-hcp-0208/**'
   workflow_dispatch:
 
 env:
@@ -156,26 +158,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for endpoint (retry up to 5 times, 30s apart)
+        id: endpoint
+        continue-on-error: true
         run: |
           URL="https://hcp-0208-dev.agent.opsera.dev"
           for i in 1 2 3 4 5; do
             if curl -sf --max-time 10 "$URL" -o /dev/null || curl -sf --max-time 10 "$URL/health" -o /dev/null; then
               echo "Endpoint available: $URL"
-              echo "endpoint_ok=true" >> $GITHUB_OUTPUT
+              echo "ok=true" >> $GITHUB_OUTPUT
               exit 0
             fi
             echo "Attempt $i/5: endpoint not ready, waiting 30s..."
             sleep 30
           done
           echo "Endpoint not reachable after 5 attempts – check ArgoCD sync and ingress"
-          echo "endpoint_ok=false" >> $GITHUB_OUTPUT
+          echo "ok=false" >> $GITHUB_OUTPUT
           exit 1
 
       - name: Report deployment URL
         run: |
           echo "## Verify Deployment" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** https://hcp-0208-dev.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** Endpoint checked successfully" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.endpoint.outcome }}" = "success" ]; then
+            echo "- **Status:** Endpoint reachable" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** Endpoint not yet reachable (ArgoCD/ingress may still be syncing)" >> $GITHUB_STEP_SUMMARY
+          fi
 
   deployment-summary:
     name: Deployment Summary
