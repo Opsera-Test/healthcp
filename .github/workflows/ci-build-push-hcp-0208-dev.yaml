@@ -90,6 +90,12 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
+      - name: Pull latest (RULE 143 - pull first, then changes)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -107,9 +113,6 @@ jobs:
 
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
           git add ${{ env.OPSERA_FOLDER }}/k8s/base/kustomization.yaml
           if git diff --staged --quiet; then
             echo "No manifest changes"
@@ -152,10 +155,27 @@ jobs:
     needs: [update-manifests, sync-argocd]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify step
+      - name: Wait for endpoint (retry up to 5 times, 30s apart)
         run: |
-          echo "Deployment updated. Verify at https://hcp-0208-dev.agent.opsera.dev when DNS and ingress are ready."
-          exit 0
+          URL="https://hcp-0208-dev.agent.opsera.dev"
+          for i in 1 2 3 4 5; do
+            if curl -sf --max-time 10 "$URL" -o /dev/null || curl -sf --max-time 10 "$URL/health" -o /dev/null; then
+              echo "Endpoint available: $URL"
+              echo "endpoint_ok=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Attempt $i/5: endpoint not ready, waiting 30s..."
+            sleep 30
+          done
+          echo "Endpoint not reachable after 5 attempts – check ArgoCD sync and ingress"
+          echo "endpoint_ok=false" >> $GITHUB_OUTPUT
+          exit 1
+
+      - name: Report deployment URL
+        run: |
+          echo "## Verify Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://hcp-0208-dev.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Endpoint checked successfully" >> $GITHUB_STEP_SUMMARY
 
   deployment-summary:
     name: Deployment Summary
