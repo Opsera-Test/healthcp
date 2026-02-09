@@ -1,8 +1,14 @@
 # Bootstrap MUST run first (RULE 127). Creates ECR, .opsera-* structure, ArgoCD repo secret, applications.
 name: Bootstrap Infrastructure - healthcp-0209
-# RULE 127: Run FIRST. Base skill: workflow_dispatch with no inputs key.
+# RULE 127: Run FIRST. Base skill: workflow_dispatch (optional input for API compatibility).
 on:
   workflow_dispatch:
+    inputs:
+      confirm_bootstrap:
+        description: 'Run bootstrap (type yes to confirm)'
+        required: false
+        default: 'yes'
+        type: string
 permissions:
   contents: write
   id-token: write
