@@ -1,7 +1,0 @@
-# Deployment Landscape – hcp-0208
-**Generated:** 2026-02-09 18:19 UTC
-**Commit:** cd93d55
-**Namespace:** opsera-hcp-0208-dev
-**Spoke:** opsera-usw2-np | **Hub:** argocd-usw2
----
-(Full collection requires cluster access; run with KUBECONFIG_B64 for pod/service/ArgoCD data.)
