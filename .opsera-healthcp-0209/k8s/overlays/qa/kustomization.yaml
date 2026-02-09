@@ -1,0 +1,18 @@
+# QA: Canary (RULE 106: labels includeSelectors: false, RULE 160: local resources only)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: opsera-healthcp-0209-qa
+resources:
+  - ../../base
+  - rollout-canary.yaml
+  - analysis-template.yaml
+labels:
+  - pairs:
+      app: healthcp-0209
+      env: qa
+    includeSelectors: false
+patches:
+  - path: ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: healthcp-0209

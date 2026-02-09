@@ -1,0 +1,24 @@
+# Manual promotion for Blue-Green staging (RULE 95). Promotes preview -> active.
+name: Promote Staging Rollout - healthcp-0209
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  id-token: write
+env:
+  APP_NAME: healthcp-0209
+  KUBECONFIG: /tmp/kubeconfig
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure kubectl
+        run: echo "${{ secrets.KUBECONFIG_SPOKE }}" | base64 -d > $KUBECONFIG
+      - name: Promote rollout
+        run: |
+          kubectl argo rollouts promote healthcp-0209 -n opsera-${{ env.APP_NAME }}-staging
+        continue-on-error: true
+      - name: Or promote via kubectl patch
+        run: |
+          kubectl patch rollout healthcp-0209 -n opsera-${{ env.APP_NAME }}-staging --type=merge -p '{"status":{"promoteFull":true}}'
+        continue-on-error: true

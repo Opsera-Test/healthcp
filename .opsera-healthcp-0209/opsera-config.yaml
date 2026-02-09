@@ -1,0 +1,27 @@
+# Opsera Code-to-Cloud Enterprise - Single Source of Truth (RULE 60)
+# healthcp-0209 - Custom Setup
+app_name: healthcp-0209
+tenant: opsera
+cloud: aws
+region: us-west-2
+region_short: usw2
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+domain: agent.opsera.dev
+argocd_server: argocd-usw2.agent.opsera.dev
+environments:
+  - dev
+  - qa
+  - staging
+deployment_strategy:
+  dev: rolling
+  qa: canary
+  staging: blue-green
+integrations:
+  security_scanning: warn
+  sonarqube: non-blocking
+  slack: always
+  jira: enable
+  prometheus: enable
+  newrelic: enable
+  datadog: skip

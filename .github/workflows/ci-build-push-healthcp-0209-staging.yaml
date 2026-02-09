@@ -1,0 +1,81 @@
+# CI: Deploy to Staging (Blue-Green). Manual promotion via promote-staging-rollout after deploy.
+name: CI Deploy - healthcp-0209 (staging)
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        required: true
+        type: string
+    secrets: inherit
+permissions:
+  contents: write
+  id-token: write
+env:
+  APP_NAME: healthcp-0209
+  AWS_REGION: us-west-2
+  SPOKE_CLUSTER: opsera-usw2-np
+jobs:
+  update-manifests-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Get ECR URI and update overlay
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_NAME}"
+          cd .opsera-${{ env.APP_NAME }}/k8s/overlays/staging
+          sed -i.bak "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" kustomization.yaml rollout-bluegreen.yaml 2>/dev/null || true
+          sed -i.bak "s|image: .*healthcp-0209:.*|image: ${ECR_URI}:${{ inputs.image_tag }}|g" rollout-bluegreen.yaml
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git pull --rebase origin main
+          git add .opsera-${{ env.APP_NAME }}/k8s/overlays/staging/
+          git diff --staged --quiet || (git commit -m "ci(staging): deploy ${{ inputs.image_tag }}" && git push origin main)
+  deploy-staging:
+    needs: [update-manifests-staging]
+    runs-on: ubuntu-latest
+    env:
+      KUBECONFIG: /tmp/kubeconfig
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure kubectl
+        run: echo "${{ secrets.KUBECONFIG_SPOKE }}" | base64 -d > $KUBECONFIG
+      - name: Refresh ECR secret
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_TOKEN=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+          NS=opsera-${{ env.APP_NAME }}-staging
+          kubectl create secret docker-registry ecr-pull-secret \
+            --docker-server=$AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com \
+            --docker-username=AWS --docker-password="$ECR_TOKEN" \
+            --namespace=$NS --dry-run=client -o yaml | kubectl apply -f -
+      - name: Apply (blue-green stays Paused until promotion)
+        run: |
+          kubectl apply -k .opsera-${{ env.APP_NAME }}/k8s/overlays/staging -n opsera-${{ env.APP_NAME }}-staging
+          echo "Staging rollout deployed. Promote via promote-staging-rollout-healthcp-0209 workflow when ready."
+      - name: Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {"text": "healthcp-0209 staging deploy: ${{ job.status }}. Promote when ready."}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,58 @@
+# QA: Canary Rollout (RULE 80: imagePullPolicy Always, RULE 170: replicas in rollout)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: healthcp-0209
+  labels:
+    app: healthcp-0209
+    env: qa
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthcp-0209
+  template:
+    metadata:
+      labels:
+        app: healthcp-0209
+        env: qa
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: healthcp-0209
+          image: PLACEHOLDER_ECR_URI:qa-placeholder
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+  strategy:
+    canary:
+      steps:
+        - setWeight: 10
+        - pause: { duration: 2m }
+        - setWeight: 30
+        - pause: { duration: 2m }
+        - setWeight: 60
+        - pause: { duration: 2m }
+        - setWeight: 100
+      analysis:
+        templates:
+          - templateName: healthcp-0209-qa-analysis
+        startingStep: 1

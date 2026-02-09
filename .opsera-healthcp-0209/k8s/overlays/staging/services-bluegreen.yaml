@@ -1,0 +1,16 @@
+# Blue-Green preview service (preview ReplicaSet gets this)
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthcp-0209-preview
+  labels:
+    app: healthcp-0209
+    env: staging
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: healthcp-0209

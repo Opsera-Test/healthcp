@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: opsera-healthcp-0209-dev
+resources:
+  - ../../base
+  - deployment.yaml
+commonLabels:
+  app: healthcp-0209
+  env: dev
+patches:
+  - path: ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: healthcp-0209

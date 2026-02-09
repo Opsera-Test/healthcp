@@ -1,0 +1,6 @@
+# Base - shared resources only (RULE 169: no deployment.yaml when overlays use Rollouts)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service.yaml
+  - ingress.yaml

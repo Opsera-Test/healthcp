@@ -1,0 +1,44 @@
+# Dev: Rolling deployment (RULE 74b: 8080, RULE 156: runAsUser for runAsNonRoot)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcp-0209
+  labels:
+    app: healthcp-0209
+    env: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healthcp-0209
+  template:
+    metadata:
+      labels:
+        app: healthcp-0209
+        env: dev
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: healthcp-0209
+          image: PLACEHOLDER_ECR_URI:dev-placeholder
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30

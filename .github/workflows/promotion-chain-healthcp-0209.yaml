@@ -1,0 +1,34 @@
+# Promotion: Deploy same image to QA then Staging. Run manually with image_tag from dev run (RULE 164: GH_PAT).
+name: Promotion Chain - healthcp-0209
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag from dev (e.g. dev-abc12345-20260209120000)'
+        required: true
+        type: string
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  deploy-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger QA deploy
+        run: |
+          gh workflow run "ci-build-push-healthcp-0209-qa.yaml" -f image_tag="${{ inputs.image_tag }}"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+      - name: Wait for QA workflow
+        run: sleep 30 && gh run list --workflow=ci-build-push-healthcp-0209-qa.yaml --limit 1
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+  deploy-staging:
+    needs: [deploy-qa]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Staging deploy
+        run: |
+          gh workflow run "ci-build-push-healthcp-0209-staging.yaml" -f image_tag="${{ inputs.image_tag }}"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}

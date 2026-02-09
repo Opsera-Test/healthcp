@@ -1,0 +1,41 @@
+# Diagnostics (RULE 173: step-level env filter for workflow_dispatch). RULE 157: tee -a GITHUB_STEP_SUMMARY.
+name: Diagnostics - healthcp-0209
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to diagnose'
+        required: true
+        type: choice
+        options: [dev, qa, staging]
+permissions:
+  contents: read
+  id-token: write
+env:
+  APP_NAME: healthcp-0209
+  KUBECONFIG: /tmp/kubeconfig
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check environment filter
+        id: check
+        run: echo "skip=false" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+      - name: Configure kubectl
+        if: steps.check.outputs.skip != 'true'
+        run: echo "${{ secrets.KUBECONFIG_SPOKE }}" | base64 -d > $KUBECONFIG
+      - name: Namespace and pods
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          NS=opsera-${{ env.APP_NAME }}-${{ inputs.environment }}
+          kubectl get pods,svc,ingress -n $NS -o wide | tee -a $GITHUB_STEP_SUMMARY
+      - name: Rollout/Deployment status
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          NS=opsera-${{ env.APP_NAME }}-${{ inputs.environment }}
+          kubectl get rollout,deployment -n $NS 2>/dev/null || true
+          kubectl describe rollout healthcp-0209 -n $NS 2>/dev/null || true
+          kubectl describe deployment healthcp-0209 -n $NS 2>/dev/null || true
+          echo "---" >> $GITHUB_STEP_SUMMARY

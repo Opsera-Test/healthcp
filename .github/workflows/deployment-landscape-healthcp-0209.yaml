@@ -1,0 +1,23 @@
+# Deployment landscape: dashboard update and S3 hub publish (phase=deployment-landscape).
+name: Deployment Landscape - healthcp-0209
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["CI Build & Deploy - healthcp-0209 (dev)"]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  update-landscape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate deployment summary
+        run: |
+          echo "## healthcp-0209 Deployment Landscape" >> $GITHUB_STEP_SUMMARY
+          echo "- App: healthcp-0209" >> $GITHUB_STEP_SUMMARY
+          echo "- Tenant: opsera" >> $GITHUB_STEP_SUMMARY
+          echo "- Environments: dev, qa, staging" >> $GITHUB_STEP_SUMMARY
+          echo "- Domain: agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
