@@ -1,10 +1,22 @@
-# Quality & security gates: Gitleaks, Grype, SonarQube (non-blocking). Run on PR or push.
+# Quality & security gates: Gitleaks, SonarQube (non-blocking). Only when code/config changes.
 name: Quality & Security Gates - healthcp-0209
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/**'
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/**'
 permissions:
   contents: read
   security-events: write

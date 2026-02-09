@@ -1,6 +1,5 @@
 # Bootstrap MUST run first (RULE 127). Creates ECR, .opsera-* structure, ArgoCD repo secret, applications.
 name: Bootstrap Infrastructure - healthcp-0209
-# RULE 127: Run FIRST. Base skill: workflow_dispatch (optional input for API compatibility).
 on:
   workflow_dispatch:
     inputs:
@@ -91,7 +90,7 @@ jobs:
       KUBECONFIG: /tmp/kubeconfig
     steps:
       - uses: actions/checkout@v4
-      - name: Register repo with ArgoCD (RULE 63: GH_PAT)
+      - name: Register repo with ArgoCD (RULE 63 GH_PAT)
         run: |
           echo "${{ secrets.KUBECONFIG_HUB }}" | base64 -d > $KUBECONFIG || true
           kubectl create secret generic repo-${{ env.APP_NAME }} \
@@ -100,7 +99,9 @@ jobs:
             -n argocd --dry-run=client -o yaml | kubectl apply -f - || true
 
   apply-argocd-apps:
-    needs: [create-opsera-config, register-argocd-repo]
+    needs:
+      - create-opsera-config
+      - register-argocd-repo
     runs-on: ubuntu-latest
     env:
       KUBECONFIG: /tmp/kubeconfig
@@ -118,8 +119,10 @@ jobs:
           kubectl apply -f .opsera-${{ env.APP_NAME }}/argocd/qa/application.yaml
           kubectl apply -f .opsera-${{ env.APP_NAME }}/argocd/staging/application.yaml
       - name: Commit resolved ArgoCD configs
+        env:
+          COMMIT_MSG: "chore - resolve ArgoCD repo URL for ${{ env.APP_NAME }}"
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add .opsera-${{ env.APP_NAME }}/argocd/
-          git diff --staged --quiet || (git commit -m "chore: resolve ArgoCD repo URL for ${{ env.APP_NAME }}" && git push origin main)
+          git diff --staged --quiet || (git commit -m "$COMMIT_MSG" && git push origin main)

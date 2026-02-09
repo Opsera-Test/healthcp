@@ -79,12 +79,14 @@ jobs:
           sed -i.bak "s|image: .*|image: ${ECR_URI}:${TAG}|g" deployment.yaml
           sed -i.bak "s|newTag:.*|newTag: ${TAG}|g" kustomization.yaml 2>/dev/null || true
       - name: Commit and push
+        env:
+          COMMIT_MSG: "ci dev deploy ${{ needs.build-push.outputs.image_tag }}"
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git pull --rebase origin main
           git add .opsera-${{ env.APP_NAME }}/k8s/overlays/dev/
-          git diff --staged --quiet || (git commit -m "ci(dev): deploy ${{ needs.build-push.outputs.image_tag }}" && git push origin main)
+          git diff --staged --quiet || (git commit -m "$COMMIT_MSG" && git push origin main)
   deploy-dev:
     needs: [update-manifests]
     runs-on: ubuntu-latest

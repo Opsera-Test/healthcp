@@ -38,12 +38,14 @@ jobs:
           sed -i.bak "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" kustomization.yaml rollout-bluegreen.yaml 2>/dev/null || true
           sed -i.bak "s|image: .*healthcp-0209:.*|image: ${ECR_URI}:${{ inputs.image_tag }}|g" rollout-bluegreen.yaml
       - name: Commit and push
+        env:
+          COMMIT_MSG: "ci staging deploy ${{ inputs.image_tag }}"
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git pull --rebase origin main
           git add .opsera-${{ env.APP_NAME }}/k8s/overlays/staging/
-          git diff --staged --quiet || (git commit -m "ci(staging): deploy ${{ inputs.image_tag }}" && git push origin main)
+          git diff --staged --quiet || (git commit -m "$COMMIT_MSG" && git push origin main)
   deploy-staging:
     needs: [update-manifests-staging]
     runs-on: ubuntu-latest
