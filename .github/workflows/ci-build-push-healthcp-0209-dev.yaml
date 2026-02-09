@@ -1,10 +1,19 @@
-# CI: Build, scan (warn), push, deploy to dev. RULE 175: immutable tags. RULE 147: AWS_ACCOUNT_ID per job.
+# CI: Build, scan (warn), push, deploy to dev. Base skill: paths exclude overlays (CICD-012, RACE-004).
 name: CI Build & Deploy - healthcp-0209 (dev)
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.opsera-healthcp-0209/Dockerfile'
+      - 'nginx.conf'
   workflow_dispatch:
-    inputs: {}
 permissions:
   contents: write
   id-token: write

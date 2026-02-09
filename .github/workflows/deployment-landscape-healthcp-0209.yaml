@@ -1,7 +1,7 @@
 # Deployment landscape: dashboard update and S3 hub publish (phase=deployment-landscape).
 name: Deployment Landscape - healthcp-0209
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   workflow_run:
     workflows: ["CI Build & Deploy - healthcp-0209 (dev)"]
     types: [completed]

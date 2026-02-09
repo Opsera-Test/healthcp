@@ -1,7 +1,7 @@
 # Manual promotion for Blue-Green staging (RULE 95). Promotes preview -> active.
 name: Promote Staging Rollout - healthcp-0209
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 permissions:
   contents: read
   id-token: write
