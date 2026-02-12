@@ -1,3 +1,0 @@
-- op: replace
-  path: /spec/rules/0/host
-  value: healthcp-0209-staging.agent.opsera.dev
