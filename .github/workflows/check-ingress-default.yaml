@@ -1,0 +1,79 @@
+# One-off diagnostic: list ingresses and ingress controller default backend.
+# Uses repo/org AWS secrets. Run: gh workflow run check-ingress-default.yaml
+# Then open the run and check the "Ingress and controller" step logs.
+
+name: "Check Ingress / Default Backend"
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  SPOKE_CLUSTER: opsera-usw2-np
+  HUB_CLUSTER: argocd-usw2
+
+jobs:
+  check:
+    name: "Ingress and controller"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig (SPOKE)
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} --alias spoke
+          echo "--- SPOKE context ---"
+          kubectl config current-context
+
+      - name: List all Ingresses (SPOKE)
+        run: |
+          echo "========== ALL INGRESSES (SPOKE) =========="
+          kubectl get ingress -A -o wide 2>/dev/null || true
+          echo ""
+          echo "========== INGRESSES YAML (hosts and backends) =========="
+          kubectl get ingress -A -o yaml 2>/dev/null | grep -E "^\s*(host:|serviceName|name:)" || true
+
+      - name: Ingress controller namespace and deployment
+        run: |
+          echo "========== NAMESPACES (looking for ingress) =========="
+          kubectl get ns | grep -E "ingress|nginx" || true
+          for ns in ingress-nginx ingress nginx-ingress kube-system; do
+            if kubectl get ns "$ns" 2>/dev/null; then
+              echo "--- Deployment in $ns ---"
+              kubectl get deployment -n "$ns" -o wide 2>/dev/null || true
+              echo "--- ConfigMaps in $ns ---"
+              kubectl get configmap -n "$ns" 2>/dev/null || true
+            fi
+          done
+
+      - name: NGINX Ingress controller args (default backend)
+        run: |
+          echo "========== DEFAULT BACKEND IN CONTROLLER =========="
+          for ns in ingress-nginx ingress nginx-ingress; do
+            if kubectl get deployment -n "$ns" 2>/dev/null | grep -q .; then
+              echo "--- Controller deployment in $ns (args/command) ---"
+              kubectl get deployment -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{.spec.template.spec.containers[0].args}{"\n"}{.spec.template.spec.containers[0].command}{"\n"}{end}' 2>/dev/null || true
+              kubectl get deployment -n "$ns" -o yaml 2>/dev/null | grep -A2 "default-backend\|defaultbackend" || true
+            fi
+          done
+          echo "--- Any service named default-backend or *backend* ---"
+          kubectl get svc -A | grep -i backend || true
+
+      - name: Ingress classes and annotations
+        run: |
+          echo "========== INGRESS CLASSES =========="
+          kubectl get ingressclass -o wide 2>/dev/null || true
+          echo ""
+          echo "========== HEALTHCP INGRESS (opsera-healthcp-0212-dev) =========="
+          kubectl get ingress -n opsera-healthcp-0212-dev -o yaml 2>/dev/null || true
+
+      - name: Update kubeconfig (HUB) and list Ingresses on HUB
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }} --alias hub
+          echo "========== ALL INGRESSES (HUB) =========="
+          kubectl --context hub get ingress -A -o wide 2>/dev/null || true
