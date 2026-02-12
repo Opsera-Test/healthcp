@@ -101,7 +101,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check-bootstrap-prerequisites]
     if: needs.check-bootstrap-prerequisites.outputs.bootstrap_complete == 'true'
-    continue-on-error: ${{ vars.GITLEAKS_MODE == 'warn' }}
+    # Default: warn (don't fail run). Set repo var GITLEAKS_MODE=block to fail on secrets.
+    continue-on-error: ${{ vars.GITLEAKS_MODE != 'block' }}
     steps:
       - uses: actions/checkout@v4
       - name: Run Gitleaks
