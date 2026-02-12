@@ -1,0 +1,23 @@
+# Opsera Code-to-Cloud Enterprise - Application configuration
+# App: healthcp-0212 | Tenant: opsera | Region: us-west-2
+
+app_name: healthcp-0212
+tenant: opsera
+region: us-west-2
+region_short: usw2
+
+# Cluster names (confirmed in Quick Setup)
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+
+# ArgoCD server (for reference)
+argocd_server: argocd-usw2.agent.opsera.dev
+
+# Base domain for ingress
+domain: agent.opsera.dev
+
+# ECR repository name: tenant/app_name
+ecr_repo: opsera/healthcp-0212
+
+# Application port (matches Dockerfile and nginx)
+port: 8080

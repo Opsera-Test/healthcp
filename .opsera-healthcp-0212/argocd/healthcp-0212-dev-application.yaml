@@ -1,0 +1,35 @@
+# ArgoCD Application for dev - reference only; CI/CD creates/updates this on HUB
+# RULE 149: destination.name (spoke cluster name), not destination.server
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opsera-healthcp-0212-dev
+  namespace: argocd
+  labels:
+    tenant: opsera
+    app: healthcp-0212
+    environment: dev
+    managed-by: opsera-c2c
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/opsera-agentic/healthcp.git
+    targetRevision: main
+    path: .opsera-healthcp-0212/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-healthcp-0212-dev
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - Replace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
