@@ -10,7 +10,8 @@
 name: "Bootstrap Infrastructure - healthcp-0212"
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+  workflow_call: {}
 
 env:
   APP_NAME: healthcp-0212
