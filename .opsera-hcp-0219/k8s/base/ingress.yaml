@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hcp-0219
+  labels:
+    app: hcp-0219
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hcp-0219.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hcp-0219
+                port:
+                  number: 8080

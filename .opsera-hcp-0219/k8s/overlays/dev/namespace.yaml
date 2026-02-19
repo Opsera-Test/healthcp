@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-hcp-0219-dev
+  labels:
+    tenant: opsera
+    app: hcp-0219
+    environment: dev
+    managed-by: opsera-c2c

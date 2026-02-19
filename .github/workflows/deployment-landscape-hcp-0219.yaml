@@ -1,0 +1,64 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Deployment Landscape - hcp-0219
+# Provides a snapshot of the current deployment state across environments.
+# ════════════════════════════════════════════════════════════════════════════
+
+name: "Deployment Landscape - hcp-0219"
+
+on:
+  workflow_dispatch: {}
+
+env:
+  APP_NAME: hcp-0219
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+jobs:
+  landscape:
+    name: "Deployment Landscape"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubeconfig (HUB + SPOKE)
+        run: |
+          aws eks update-kubeconfig --name ${HUB_CLUSTER} --region ${AWS_REGION} --alias hub
+          aws eks update-kubeconfig --name ${SPOKE_CLUSTER} --region ${AWS_REGION} --alias spoke
+
+      - name: Get ArgoCD App Status
+        run: |
+          APP_FULL="${TENANT}-${APP_NAME}-dev"
+          echo "ArgoCD Application: ${APP_FULL}"
+          kubectl --context hub get application ${APP_FULL} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Not found"
+          echo ""
+          kubectl --context hub get application ${APP_FULL} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Not found"
+
+      - name: Get pod status (SPOKE - dev)
+        run: |
+          NS="${TENANT}-${APP_NAME}-dev"
+          echo "Namespace: ${NS}"
+          kubectl --context spoke get pods -n ${NS} -o wide 2>/dev/null || echo "No pods found"
+
+      - name: Get current image tag (dev)
+        run: |
+          NS="${TENANT}-${APP_NAME}-dev"
+          IMAGE=$(kubectl --context spoke get deployment ${APP_NAME} -n ${NS} -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "Not deployed")
+          echo "Current image: ${IMAGE}"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║  DEPLOYMENT LANDSCAPE: ${APP_NAME}"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  Environment: dev"
+          echo "║  Namespace:   ${TENANT}-${APP_NAME}-dev"
+          echo "║  App URL:     https://${APP_NAME}.agent.opsera.dev"
+          echo "╚══════════════════════════════════════════════════════════════╝"
