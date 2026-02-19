@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcp-0219
+  labels:
+    app: healthcp-0219
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healthcp-0219
+  template:
+    metadata:
+      labels:
+        app: healthcp-0219
+    spec:
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: healthcp-0219
+          image: opsera/healthcp-0219:placeholder
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15

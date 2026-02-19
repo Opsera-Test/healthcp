@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: healthcp-0219
+  labels:
+    app: healthcp-0219
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: healthcp-0219.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: healthcp-0219
+                port:
+                  number: 8080
