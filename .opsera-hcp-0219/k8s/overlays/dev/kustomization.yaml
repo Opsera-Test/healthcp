@@ -11,7 +11,7 @@ resources:
 images:
   - name: opsera/hcp-0219:placeholder
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0219
-    newTag: placeholder
+    newTag: dev-2c805c50-20260219210244
 
 # RULE 106: labels with includeSelectors: false (no commonLabels in overlays)
 labels:
