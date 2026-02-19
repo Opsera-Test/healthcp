@@ -4,6 +4,8 @@ metadata:
   name: hcp-0219
   labels:
     app: hcp-0219
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
 spec:
   ingressClassName: nginx
   rules:
