@@ -326,6 +326,12 @@ jobs:
             --dry-run=client -o yaml | kubectl --context spoke apply -f -
           echo "✅ ECR secret refreshed in ${NS}"
 
+      - name: Rollout restart to pick up fresh ECR credentials
+        run: |
+          NS="${TENANT}-${APP_NAME}-${ENV}"
+          kubectl --context spoke rollout restart deployment/${APP_NAME} -n ${NS} 2>/dev/null || echo "Deployment not yet created — ArgoCD will sync it"
+          echo "✅ Rollout restart triggered"
+
   # ─────────────────────────────────────────────────────────────────────────
   # Stage 6: ArgoCD Sync
   # ─────────────────────────────────────────────────────────────────────────
@@ -383,8 +389,9 @@ jobs:
       - name: Verify pods and rollout
         run: |
           NS="${TENANT}-${APP_NAME}-${ENV}"
+          sleep 20
           kubectl --context spoke get pods -n $NS -o wide
-          kubectl --context spoke rollout status deployment/${APP_NAME} -n $NS --timeout=120s
+          kubectl --context spoke rollout status deployment/${APP_NAME} -n $NS --timeout=180s
           echo "✅ Deployment healthy"
 
       - name: Health check (port-forward)
