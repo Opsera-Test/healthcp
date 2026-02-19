@@ -1,0 +1,32 @@
+# Opsera Vibe-Shift Configuration
+# Auto-generated - do not modify manually
+apiVersion: opsera.io/v1
+kind: VibeShiftConfig
+metadata:
+  name: "hcp-test-0219"
+  createdAt: "2026-02-19T00:00:00Z"
+  version: "1.0"
+
+config:
+  appName: "hcp-test-0219"
+  tenant: "opsera"
+  environment: "uat"
+  branch: "main"
+  cloud: "aws"
+  region: "us-west-2"
+  mode: "vibe-shift-autonomous"
+
+deployment:
+  namespace: "opsera-hcp-test-0219-uat"
+  hubCluster: "argocd-usw2"
+  spokeCluster: "opsera-usw2-np"
+  argocdServer: "argocd-usw2.agent.opsera.dev"
+  appUrl: "https://hcp-test-0219.agent.opsera.dev"
+  ecrRepo: "opsera/hcp-test-0219"
+  strategy: "rolling"
+  environments: ["uat"]
+
+detectedConfig:
+  appType: "react"
+  port: 8080
+  dockerfileGenerated: false

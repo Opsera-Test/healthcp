@@ -1,0 +1,545 @@
+name: "CI/CD - hcp-test-0219 uat"
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.opsera-hcp-test-0219/k8s/**'
+      - '.opsera-hcp-test-0219/argocd/**'
+      - '.opsera-hcp-test-0219/opsera-config.yaml'
+      - '.opsera-hcp-test-0219/landscapes/**'
+      - '**.md'
+  workflow_dispatch:
+
+env:
+  APP_NAME: "hcp-test-0219"
+  NAMESPACE: "opsera-hcp-test-0219-uat"
+  HUB_CLUSTER: "argocd-usw2"
+  SPOKE_CLUSTER: "opsera-usw2-np"
+  ECR_REPO: "opsera/hcp-test-0219"
+  APP_FOLDER: ".opsera-hcp-test-0219"
+  APP_PORT: "8080"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 0: Bootstrap (idempotent — runs on every push, no manual step needed)
+  # ─────────────────────────────────────────────────────────────────────────────
+  bootstrap:
+    name: "Bootstrap Infrastructure"
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_registry: ${{ steps.aws-info.outputs.ecr_registry }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Get AWS Account ID
+        id: aws-info
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$AWS_ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "ecr_registry=${AWS_ACCOUNT_ID}.dkr.ecr.us-west-2.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Create ECR repository (idempotent)
+        run: |
+          if aws ecr describe-repositories --repository-names "${{ env.ECR_REPO }}" --region us-west-2 2>/dev/null; then
+            echo "ECR repository already exists"
+          else
+            aws ecr create-repository \
+              --repository-name "${{ env.ECR_REPO }}" \
+              --region us-west-2 \
+              --image-scanning-configuration scanOnPush=false \
+              --tags Key=managed-by,Value=opsera Key=app,Value=${{ env.APP_NAME }} Key=env,Value=uat
+            echo "✓ ECR repository created: ${{ env.ECR_REPO }}"
+          fi
+
+      - name: Configure kubectl for HUB cluster (ArgoCD)
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.HUB_CLUSTER }}" \
+            --region us-west-2 \
+            --alias hub
+
+      - name: Register Git repository with ArgoCD (idempotent, HTTPS only)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          REPO_URL=$(git remote get-url origin)
+          REPO_URL=$(echo "$REPO_URL" \
+            | sed 's|git@github\.com:|https://github.com/|' \
+            | sed 's|\.git$||')
+          if ! echo "$REPO_URL" | grep -q "^https://"; then
+            echo "❌ Repo URL is not HTTPS: $REPO_URL"
+            exit 1
+          fi
+          echo "Registering repo (HTTPS): $REPO_URL"
+          SECRET_NAME="repo-$(echo '${{ env.APP_NAME }}' | tr '[:upper:]' '[:lower:]')"
+          kubectl --context hub apply -f - <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ${SECRET_NAME}
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: "${REPO_URL}"
+            username: git
+            password: "${GH_PAT}"
+          EOF
+          echo "✓ Repository registered with ArgoCD: $REPO_URL"
+
+      - name: Configure kubectl for SPOKE cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.SPOKE_CLUSTER }}" \
+            --region us-west-2 \
+            --alias spoke
+
+      - name: Create namespace on SPOKE (idempotent)
+        run: |
+          kubectl --context spoke create namespace "${{ env.NAMESPACE }}" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "✓ Namespace ready: ${{ env.NAMESPACE }}"
+
+      - name: Create ServiceAccount on SPOKE (idempotent)
+        run: |
+          kubectl --context spoke create serviceaccount "${{ env.APP_NAME }}" \
+            -n "${{ env.NAMESPACE }}" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "✓ ServiceAccount ready"
+
+      - name: Create/refresh ECR pull secret on SPOKE
+        run: |
+          ECR_REGISTRY="${{ steps.aws-info.outputs.ecr_registry }}"
+          ECR_PASSWORD=$(aws ecr get-login-password --region us-west-2)
+          kubectl --context spoke create secret docker-registry ecr-secret \
+            --namespace "${{ env.NAMESPACE }}" \
+            --docker-server="${ECR_REGISTRY}" \
+            --docker-username=AWS \
+            --docker-password="${ECR_PASSWORD}" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "✓ ECR pull secret ready in ${{ env.NAMESPACE }}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 1 + 2: Build & Push Docker Image to ECR
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: "Build & Push to ECR"
+    runs-on: ubuntu-latest
+    needs: [bootstrap]
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+      image_name: ${{ steps.tag.outputs.image_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Set image tag
+        id: tag
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.us-west-2.amazonaws.com"
+          IMAGE_TAG="${GITHUB_SHA::8}-$(date +%Y%m%d%H%M%S)"
+          IMAGE_NAME="${ECR_REGISTRY}/${{ env.ECR_REPO }}:${IMAGE_TAG}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "ecr_registry=${ECR_REGISTRY}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        run: |
+          ECR_REGISTRY="${{ steps.tag.outputs.ecr_registry }}"
+          aws ecr get-login-password --region us-west-2 | \
+            docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Build image
+        run: |
+          docker build \
+            -t "${{ steps.tag.outputs.image_name }}" \
+            -f "Dockerfile" \
+            .
+
+      - name: Push to ECR
+        run: |
+          docker push "${{ steps.tag.outputs.image_name }}"
+          echo "✓ Pushed: ${{ steps.tag.outputs.image_name }}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 3: Update Kubernetes Manifests
+  # ─────────────────────────────────────────────────────────────────────────────
+  update-manifests:
+    name: "Update Manifests"
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Get ECR registry
+        id: aws
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ecr_registry=${AWS_ACCOUNT_ID}.dkr.ecr.us-west-2.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Update kustomization image tag
+        run: |
+          KUSTOMIZATION="${{ env.APP_FOLDER }}/k8s/base/kustomization.yaml"
+          NEW_NAME="${{ steps.aws.outputs.ecr_registry }}/${{ env.ECR_REPO }}"
+          IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          sed -i "s|^\( *newName: *\).*|\1${NEW_NAME}|" "$KUSTOMIZATION"
+          sed -i "s|^\( *newTag: *\).*|\1${IMAGE_TAG}|" "$KUSTOMIZATION"
+          echo "✓ kustomization.yaml updated → tag: ${IMAGE_TAG}"
+
+      - name: Commit and push (idempotent)
+        run: |
+          KUSTOMIZATION="${{ env.APP_FOLDER }}/k8s/base/kustomization.yaml"
+          git config user.name "opsera-vibe-shift[bot]"
+          git config user.email "vibe-shift@opsera.io"
+          git stash push -m "kustomization-update" -- "$KUSTOMIZATION"
+          git pull --rebase origin main
+          git stash pop
+          if git diff --quiet "$KUSTOMIZATION" && git diff --cached --quiet "$KUSTOMIZATION"; then
+            echo "No changes to commit"
+          else
+            git add "$KUSTOMIZATION"
+            git commit -m "chore(deploy): update ${{ env.APP_NAME }} to ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
+            git push origin main
+            echo "✓ Manifests committed and pushed"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 4: Create/Update ArgoCD Application (HUB)
+  # ─────────────────────────────────────────────────────────────────────────────
+  create-argocd-app:
+    name: "Create/Update ArgoCD App"
+    runs-on: ubuntu-latest
+    needs: [update-manifests]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Connect to HUB cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.HUB_CLUSTER }}" \
+            --region us-west-2
+
+      - name: Apply ArgoCD Application (idempotent)
+        run: |
+          REPO_URL=$(git remote get-url origin)
+          REPO_URL=$(echo "$REPO_URL" \
+            | sed 's|git@github\.com:|https://github.com/|' \
+            | sed 's|\.git$||')
+          kubectl apply -f - <<EOF
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: ${{ env.APP_NAME }}-uat
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: ${REPO_URL}
+              targetRevision: main
+              path: ${{ env.APP_FOLDER }}/k8s/overlays/uat
+            destination:
+              name: ${{ env.SPOKE_CLUSTER }}
+              namespace: ${{ env.NAMESPACE }}
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+                - PruneLast=true
+          EOF
+          echo "✓ ArgoCD Application ${{ env.APP_NAME }}-uat applied"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 5: Refresh ECR Secret (SPOKE) — BEFORE ArgoCD sync!
+  # ─────────────────────────────────────────────────────────────────────────────
+  refresh-ecr-secret:
+    name: "Refresh ECR Secret"
+    runs-on: ubuntu-latest
+    needs: [create-argocd-app]
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Connect to SPOKE cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.SPOKE_CLUSTER }}" \
+            --region us-west-2
+
+      - name: Refresh ECR pull secret
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.us-west-2.amazonaws.com"
+          ECR_PASSWORD=$(aws ecr get-login-password --region us-west-2)
+          kubectl create secret docker-registry ecr-secret \
+            --namespace "${{ env.NAMESPACE }}" \
+            --docker-server="${ECR_REGISTRY}" \
+            --docker-username=AWS \
+            --docker-password="${ECR_PASSWORD}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "✓ ECR pull secret refreshed in ${{ env.NAMESPACE }}"
+
+      - name: Restart deployment to pick up fresh ECR credentials
+        run: |
+          if kubectl get deployment "${{ env.APP_NAME }}" -n "${{ env.NAMESPACE }}" >/dev/null 2>&1; then
+            kubectl rollout restart deployment/${{ env.APP_NAME }} \
+              --namespace "${{ env.NAMESPACE }}"
+            echo "✓ Deployment restart triggered (pods will use fresh ECR secret)"
+          else
+            echo "ℹ️  Deployment not found yet (will be created by ArgoCD in Stage 6)"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 6: ArgoCD Hard Refresh + Sync + Wait (HUB)
+  # ─────────────────────────────────────────────────────────────────────────────
+  argocd-sync:
+    name: "ArgoCD Sync"
+    runs-on: ubuntu-latest
+    needs: [refresh-ecr-secret]
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Connect to HUB cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.HUB_CLUSTER }}" \
+            --region us-west-2
+
+      - name: Hard refresh
+        run: |
+          kubectl annotate application "${{ env.APP_NAME }}-uat" \
+            -n argocd \
+            argocd.argoproj.io/refresh=hard \
+            --overwrite
+          sleep 15
+          echo "✓ Hard refresh triggered"
+
+      - name: Trigger sync
+        run: |
+          kubectl patch application "${{ env.APP_NAME }}-uat" \
+            -n argocd \
+            --type merge \
+            -p '{"operation":{"initiatedBy":{"username":"opsera-vibe-shift"},"sync":{"revision":"HEAD","prune":true,"force":false}}}'
+          echo "✓ Sync triggered"
+
+      - name: Wait for Synced + Healthy
+        run: |
+          TIMEOUT=300
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            SYNC=$(kubectl get application "${{ env.APP_NAME }}-uat" \
+              -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH=$(kubectl get application "${{ env.APP_NAME }}-uat" \
+              -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "[${ELAPSED}s] Sync: ${SYNC} | Health: ${HEALTH}"
+            if [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+              echo "✓ Application Synced and Healthy"
+              exit 0
+            fi
+            sleep 15
+            ELAPSED=$((ELAPSED + 15))
+          done
+          echo "❌ Timeout after ${TIMEOUT}s — check ArgoCD: https://argocd-usw2.agent.opsera.dev"
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 7: Verify Deployment + HTTPS URL Check
+  # ─────────────────────────────────────────────────────────────────────────────
+  verify:
+    name: "Verify Deployment"
+    runs-on: ubuntu-latest
+    needs: [argocd-sync, build-and-push]
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Connect to SPOKE cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.SPOKE_CLUSTER }}" \
+            --region us-west-2
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/"${{ env.APP_NAME }}" \
+            -n "${{ env.NAMESPACE }}" \
+            --timeout=300s
+          echo "✓ Rolling deployment complete"
+
+      - name: Pod summary
+        run: |
+          kubectl get pods -n "${{ env.NAMESPACE }}" -l app=${{ env.APP_NAME }} -o wide
+
+      - name: Verify HTTPS URL (self-healing ingress)
+        run: |
+          APP_URL="https://${{ env.APP_NAME }}.agent.opsera.dev"
+          echo "Checking: ${APP_URL}"
+
+          INGRESS_ADDRESS=$(kubectl get ingress "${{ env.APP_NAME }}" -n "${{ env.NAMESPACE }}" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
+          if [ -z "$INGRESS_ADDRESS" ]; then
+            echo "⚠️  Ingress has no ADDRESS assigned yet"
+            ANNOTATION=$(kubectl get ingress "${{ env.APP_NAME }}" -n "${{ env.NAMESPACE }}" \
+              -o jsonpath='{.metadata.annotations.kubernetes\.io/ingress\.class}' 2>/dev/null || echo "")
+            if [ -z "$ANNOTATION" ]; then
+              echo "   Annotation missing - patching live Ingress to force controller pickup"
+              kubectl annotate ingress "${{ env.APP_NAME }}" -n "${{ env.NAMESPACE }}" \
+                kubernetes.io/ingress.class=nginx --overwrite
+              echo "   ✓ Annotation patched"
+              for i in $(seq 1 12); do
+                sleep 5
+                INGRESS_ADDRESS=$(kubectl get ingress "${{ env.APP_NAME }}" -n "${{ env.NAMESPACE }}" \
+                  -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+                if [ -n "$INGRESS_ADDRESS" ]; then
+                  echo "   ✓ ADDRESS assigned after patch: ${INGRESS_ADDRESS}"
+                  break
+                fi
+                echo "   Attempt ${i}/12..."
+              done
+            fi
+            if [ -z "$INGRESS_ADDRESS" ]; then
+              echo "❌ FAILURE: Ingress still has no ADDRESS after 60 seconds"
+              exit 1
+            fi
+          else
+            echo "✓ Ingress ADDRESS assigned: ${INGRESS_ADDRESS}"
+          fi
+
+          for i in $(seq 1 10); do
+            HTTP=$(curl -sLo /dev/null -w "%{http_code}" --max-time 15 "${APP_URL}" 2>/dev/null || echo "000")
+            echo "Attempt ${i}/10: HTTP ${HTTP}"
+            if [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 400 ]; then
+              echo "✅ Application is LIVE: ${APP_URL} (HTTP ${HTTP})"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "❌ FAILURE: URL not responding after 10 attempts (5 minutes)"
+          exit 1
+
+      - name: Deployment summary
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════════╗"
+          echo "║  DEPLOYMENT COMPLETE                                             ║"
+          echo "╠══════════════════════════════════════════════════════════════════╣"
+          echo "║  App:       ${{ env.APP_NAME }}"
+          echo "║  Env:       uat"
+          echo "║  Image Tag: ${{ needs.build-and-push.outputs.image_tag }}"
+          echo "║  Namespace: ${{ env.NAMESPACE }}"
+          echo "╠══════════════════════════════════════════════════════════════════╣"
+          echo "║  Pipeline:  Bootstrap ✓  7/7 stages ✓                          ║"
+          echo "║  Stages:    Build → Push → Manifests → ArgoCD App               ║"
+          echo "║             → ECR Secret → Sync → Verify                        ║"
+          echo "╠══════════════════════════════════════════════════════════════════╣"
+          echo "║  🌐 https://${{ env.APP_NAME }}.agent.opsera.dev"
+          echo "╚══════════════════════════════════════════════════════════════════╝"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # RECORD: Deployment Landscape
+  # ─────────────────────────────────────────────────────────────────────────────
+  record-landscape:
+    name: "Record Deployment Landscape"
+    runs-on: ubuntu-latest
+    needs: [verify, build-and-push]
+    if: success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Write landscape entry
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LANDSCAPE_DIR="${{ env.APP_FOLDER }}/landscapes"
+          mkdir -p "$LANDSCAPE_DIR"
+          cat > "$LANDSCAPE_DIR/latest.md" <<EOF
+          # Deployment Landscape: ${{ env.APP_NAME }}
+          **Deployed:** $TIMESTAMP
+          **Environment:** uat
+          **Image Tag:** ${{ needs.build-and-push.outputs.image_tag }}
+          **Namespace:** ${{ env.NAMESPACE }}
+          **URL:** https://${{ env.APP_NAME }}.agent.opsera.dev
+          **ArgoCD:** https://argocd-usw2.agent.opsera.dev
+
+          ## Pipeline
+          | Job | Status |
+          |-----|--------|
+          | Bootstrap (Job 0) | ✓ ECR, ArgoCD repo, namespace, SA, ECR secret |
+          | Stage 1: Build Image | ✓ |
+          | Stage 2: Push to ECR | ✓ ${{ needs.build-and-push.outputs.image_tag }} |
+          | Stage 3: Update Manifests | ✓ kustomization.yaml |
+          | Stage 4: Create ArgoCD App | ✓ ${{ env.APP_NAME }}-uat |
+          | Stage 5: Refresh ECR Secret | ✓ |
+          | Stage 6: ArgoCD Sync | ✓ Synced + Healthy |
+          | Stage 7: Verify + HTTPS | ✓ https://${{ env.APP_NAME }}.agent.opsera.dev |
+          EOF
+
+          git config user.name "opsera-vibe-shift[bot]"
+          git config user.email "vibe-shift@opsera.io"
+          git stash push -m "landscape-update" -- "$LANDSCAPE_DIR/latest.md"
+          git pull --rebase origin main
+          git stash pop
+          git add "$LANDSCAPE_DIR/latest.md"
+          git diff --cached --quiet || git commit -m "chore(landscape): record deployment ${{ needs.build-and-push.outputs.image_tag }} [skip ci]"
+          git push origin main || true
+          echo "✓ Landscape recorded"
