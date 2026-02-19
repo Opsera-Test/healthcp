@@ -11,7 +11,7 @@ resources:
 images:
   - name: opsera/healthcp-test-0219:placeholder
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-test-0219/opsera/healthcp-test-0219
-    newTag: dev-3310295a-20260219181410
+    newTag: dev-fc900308-20260219184236
 
 # RULE 106: labels with includeSelectors: false (no commonLabels in overlays)
 labels:
