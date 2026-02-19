@@ -1,0 +1,87 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Fix Ingress - healthcp-test-0219
+# Deletes the stuck ingress and forces ArgoCD to recreate it.
+# ════════════════════════════════════════════════════════════════════════════
+
+name: "Fix Ingress - healthcp-test-0219"
+
+on:
+  workflow_dispatch: {}
+
+env:
+  APP_NAME: healthcp-test-0219
+  TENANT: opsera
+  ENV: dev
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+jobs:
+  fix-ingress:
+    name: "Fix Ingress (delete + ArgoCD resync)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubeconfig (HUB + SPOKE)
+        run: |
+          aws eks update-kubeconfig --name ${HUB_CLUSTER} --region ${AWS_REGION} --alias hub
+          aws eks update-kubeconfig --name ${SPOKE_CLUSTER} --region ${AWS_REGION} --alias spoke
+
+      - name: Diagnose current ingress state
+        run: |
+          NS="${TENANT}-${APP_NAME}-${ENV}"
+          echo "=== Current Ingress YAML ==="
+          kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o yaml 2>/dev/null || echo "No ingress found"
+          echo ""
+          echo "=== Working healthcp-0219 ingress YAML ==="
+          kubectl --context spoke get ingress healthcp-0219 -n opsera-healthcp-0219-dev -o yaml 2>/dev/null | grep -A 30 "spec:" || echo "Not found"
+
+      - name: Check nginx ingress controller logs for errors
+        run: |
+          echo "=== Recent nginx controller errors ==="
+          kubectl --context spoke logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=50 2>/dev/null | grep -iE "error|warn|healthcp-test-0219" | tail -20 || true
+          echo "=== nginx-ingress controller logs ==="
+          kubectl --context spoke logs -n ingress-nginx -l app=ingress-nginx-nginx-ingress --tail=50 2>/dev/null | grep -iE "error|warn|healthcp-test-0219" | tail -20 || true
+
+      - name: Delete stuck ingress
+        run: |
+          NS="${TENANT}-${APP_NAME}-${ENV}"
+          echo "Deleting ingress ${APP_NAME} in namespace ${NS}..."
+          kubectl --context spoke delete ingress ${APP_NAME} -n ${NS} --ignore-not-found=true
+          echo "✅ Ingress deleted"
+          sleep 5
+
+      - name: Force ArgoCD hard refresh and sync (recreate ingress)
+        run: |
+          APP_FULL="${TENANT}-${APP_NAME}-${ENV}"
+          echo "Triggering ArgoCD hard refresh for ${APP_FULL}..."
+          kubectl --context hub annotate application ${APP_FULL} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+          sleep 5
+          kubectl --context hub patch application ${APP_FULL} -n argocd --type merge \
+            -p '{"operation":{"sync":{"prune":false,"syncOptions":["Replace=true"]}}}'
+          echo "Waiting for ArgoCD to recreate ingress..."
+          sleep 30
+          kubectl --context hub get application ${APP_FULL} -n argocd -o jsonpath='Sync: {.status.sync.status} | Health: {.status.health.status}{"\n"}'
+
+      - name: Verify ingress address after recreation
+        run: |
+          NS="${TENANT}-${APP_NAME}-${ENV}"
+          echo "Checking ingress address (waiting up to 3 minutes)..."
+          for i in $(seq 1 18); do
+            ADDRESS=$(kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            HOSTNAME=$(kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            echo "[$i/18] IP: ${ADDRESS:-empty} | Hostname: ${HOSTNAME:-empty}"
+            if [ -n "$ADDRESS" ] || [ -n "$HOSTNAME" ]; then
+              echo "✅ Ingress address assigned: ${ADDRESS}${HOSTNAME}"
+              break
+            fi
+            sleep 10
+          done
+          echo "=== Final ingress state ==="
+          kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o wide
