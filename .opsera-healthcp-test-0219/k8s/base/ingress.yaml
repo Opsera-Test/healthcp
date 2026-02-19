@@ -4,6 +4,8 @@ metadata:
   name: healthcp-test-0219
   labels:
     app: healthcp-test-0219
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
 spec:
   ingressClassName: nginx
   rules:
