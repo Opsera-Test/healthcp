@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: opsera-healthcp-test-0219-dev
-  labels:
-    tenant: opsera
-    app: healthcp-test-0219
-    environment: dev
-    managed-by: opsera-c2c
