@@ -78,7 +78,7 @@ jobs:
           fi
 
           aws eks update-kubeconfig --name ${HUB_CLUSTER} --region ${AWS_REGION}
-          REPO_SECRET="repo-${{ github.repository_owner }}-${APP_NAME}"
+          REPO_SECRET="repo-$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')-${APP_NAME}"
           if ! kubectl get secret ${REPO_SECRET} -n argocd &>/dev/null; then
             ERRORS+=("ArgoCD repository not registered")
           fi

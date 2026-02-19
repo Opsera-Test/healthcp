@@ -93,7 +93,7 @@ jobs:
 
       - name: Register GitHub repo with ArgoCD (idempotent)
         run: |
-          REPO_SECRET_NAME="repo-${{ github.repository_owner }}-${APP_NAME}"
+          REPO_SECRET_NAME="repo-$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')-${APP_NAME}"
           if kubectl --context hub get secret "$REPO_SECRET_NAME" -n argocd 2>/dev/null; then
             echo "✓ Repository secret already exists"
             exit 0
