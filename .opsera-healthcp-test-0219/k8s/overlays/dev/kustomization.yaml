@@ -7,10 +7,10 @@ resources:
   - ../../base
   - namespace.yaml
 
-# Image override - CI/CD replaces 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-test-0219/opsera/healthcp-test-0219 and newTag on each deploy
+# Image override - CI/CD replaces newName and newTag on each deploy
 images:
   - name: opsera/healthcp-test-0219:placeholder
-    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-test-0219/opsera/healthcp-test-0219
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-test-0219
     newTag: dev-fc900308-20260219184236
 
 # RULE 106: labels with includeSelectors: false (no commonLabels in overlays)

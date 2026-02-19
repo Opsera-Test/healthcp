@@ -225,9 +225,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin ${{ github.ref_name }}
-          if grep -q "PLACEHOLDER_ECR_URI" "$KUSTOMIZATION"; then
-            sed -i.bak "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" "$KUSTOMIZATION"
-          fi
+          sed -i.bak "s|newName:.*|newName: ${ECR_URI}|g" "$KUSTOMIZATION"
           sed -i.bak "s|newTag:.*|newTag: ${IMAGE_TAG}|g" "$KUSTOMIZATION"
           rm -f "${KUSTOMIZATION}.bak"
           git add "$KUSTOMIZATION"
