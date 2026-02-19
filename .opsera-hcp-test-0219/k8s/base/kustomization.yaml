@@ -7,5 +7,5 @@ resources:
   - service.yaml
 images:
   - name: PLACEHOLDER_ECR_URI
-    newName: PLACEHOLDER_ECR_URI
-    newTag: latest
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-test-0219
+    newTag: 096c3e8f-20260219215722
