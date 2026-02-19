@@ -1,6 +1,6 @@
 # ════════════════════════════════════════════════════════════════════════════
 # Fix Ingress - healthcp-test-0219
-# Deletes the stuck ingress and forces ArgoCD to recreate it.
+# Gets events, describes ingress, patches with annotation, forces reload.
 # ════════════════════════════════════════════════════════════════════════════
 
 name: "Fix Ingress - healthcp-test-0219"
@@ -18,7 +18,7 @@ env:
 
 jobs:
   fix-ingress:
-    name: "Fix Ingress (delete + ArgoCD resync)"
+    name: "Fix Ingress - diagnose + patch"
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS Credentials
@@ -33,55 +33,60 @@ jobs:
           aws eks update-kubeconfig --name ${HUB_CLUSTER} --region ${AWS_REGION} --alias hub
           aws eks update-kubeconfig --name ${SPOKE_CLUSTER} --region ${AWS_REGION} --alias spoke
 
-      - name: Diagnose current ingress state
+      - name: Get Kubernetes events for ingress
         run: |
           NS="${TENANT}-${APP_NAME}-${ENV}"
-          echo "=== Current Ingress YAML ==="
-          kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o yaml 2>/dev/null || echo "No ingress found"
+          echo "=== Events in namespace ${NS} ==="
+          kubectl --context spoke get events -n ${NS} --sort-by='.lastTimestamp' 2>/dev/null | tail -20
           echo ""
-          echo "=== Working healthcp-0219 ingress YAML ==="
-          kubectl --context spoke get ingress healthcp-0219 -n opsera-healthcp-0219-dev -o yaml 2>/dev/null | grep -A 30 "spec:" || echo "Not found"
+          echo "=== Describe ingress ==="
+          kubectl --context spoke describe ingress ${APP_NAME} -n ${NS} 2>/dev/null || echo "Ingress not found"
 
-      - name: Check nginx ingress controller logs for errors
-        run: |
-          echo "=== Recent nginx controller errors ==="
-          kubectl --context spoke logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=50 2>/dev/null | grep -iE "error|warn|healthcp-test-0219" | tail -20 || true
-          echo "=== nginx-ingress controller logs ==="
-          kubectl --context spoke logs -n ingress-nginx -l app=ingress-nginx-nginx-ingress --tail=50 2>/dev/null | grep -iE "error|warn|healthcp-test-0219" | tail -20 || true
-
-      - name: Delete stuck ingress
+      - name: Check service endpoints
         run: |
           NS="${TENANT}-${APP_NAME}-${ENV}"
-          echo "Deleting ingress ${APP_NAME} in namespace ${NS}..."
-          kubectl --context spoke delete ingress ${APP_NAME} -n ${NS} --ignore-not-found=true
-          echo "✅ Ingress deleted"
-          sleep 5
+          echo "=== Service ==="
+          kubectl --context spoke get svc ${APP_NAME} -n ${NS} -o wide 2>/dev/null
+          echo ""
+          echo "=== Endpoints ==="
+          kubectl --context spoke get endpoints ${APP_NAME} -n ${NS} 2>/dev/null
+          echo ""
+          echo "=== Pods ==="
+          kubectl --context spoke get pods -n ${NS} -o wide 2>/dev/null
 
-      - name: Force ArgoCD hard refresh and sync (recreate ingress)
-        run: |
-          APP_FULL="${TENANT}-${APP_NAME}-${ENV}"
-          echo "Triggering ArgoCD hard refresh for ${APP_FULL}..."
-          kubectl --context hub annotate application ${APP_FULL} -n argocd argocd.argoproj.io/refresh=hard --overwrite
-          sleep 5
-          kubectl --context hub patch application ${APP_FULL} -n argocd --type merge \
-            -p '{"operation":{"sync":{"prune":false,"syncOptions":["Replace=true"]}}}'
-          echo "Waiting for ArgoCD to recreate ingress..."
-          sleep 30
-          kubectl --context hub get application ${APP_FULL} -n argocd -o jsonpath='Sync: {.status.sync.status} | Health: {.status.health.status}{"\n"}'
-
-      - name: Verify ingress address after recreation
+      - name: Patch ingress - add annotation kubernetes.io/ingress.class
         run: |
           NS="${TENANT}-${APP_NAME}-${ENV}"
-          echo "Checking ingress address (waiting up to 3 minutes)..."
-          for i in $(seq 1 18); do
+          echo "Adding kubernetes.io/ingress.class annotation to force old controller pickup..."
+          kubectl --context spoke annotate ingress ${APP_NAME} -n ${NS} \
+            "kubernetes.io/ingress.class=nginx" \
+            --overwrite 2>/dev/null || echo "Annotation patch failed"
+          echo "✅ Annotation added"
+          sleep 15
+          echo "=== Ingress state after annotation ==="
+          kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o wide 2>/dev/null
+
+      - name: Wait and verify ingress address
+        run: |
+          NS="${TENANT}-${APP_NAME}-${ENV}"
+          echo "Waiting for ingress address (2 minutes)..."
+          for i in $(seq 1 12); do
             ADDRESS=$(kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
             HOSTNAME=$(kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            echo "[$i/18] IP: ${ADDRESS:-empty} | Hostname: ${HOSTNAME:-empty}"
+            echo "[$i/12] IP: ${ADDRESS:-empty} | Hostname: ${HOSTNAME:-empty}"
             if [ -n "$ADDRESS" ] || [ -n "$HOSTNAME" ]; then
               echo "✅ Ingress address assigned: ${ADDRESS}${HOSTNAME}"
               break
             fi
             sleep 10
           done
-          echo "=== Final ingress state ==="
-          kubectl --context spoke get ingress ${APP_NAME} -n ${NS} -o wide
+
+      - name: Check nginx controller pod logs (last 100 lines)
+        run: |
+          echo "=== ingress-nginx-controller logs (errors) ==="
+          kubectl --context spoke logs -n ingress-nginx \
+            -l app.kubernetes.io/name=ingress-nginx \
+            --tail=100 2>/dev/null | grep -iE "error|warn|test-0219|Sync" | tail -30 || true
+          echo ""
+          echo "=== All ingress-nginx pods ==="
+          kubectl --context spoke get pods -n ingress-nginx -o wide 2>/dev/null || true
