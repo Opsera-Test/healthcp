@@ -8,4 +8,4 @@ resources:
 images:
   - name: PLACEHOLDER_ECR_URI
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/healthcp-test-0220-725d6
-    newTag: 6602d300-20260220163859
+    newTag: 2d044af9-20260220170417
