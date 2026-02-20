@@ -1,0 +1,150 @@
+name: "Bootstrap Infrastructure - healthcp-test-0220-725d6"
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_recreate:
+        description: 'Force recreate existing resources (idempotent)'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  APP_NAME: "healthcp-test-0220-725d6"
+  TENANT: "opsera"
+  ENV: "uat"
+  REGION: "us-west-2"
+  NAMESPACE: "opsera-healthcp-test-0220-725d6-uat"
+  HUB_CLUSTER: "argocd-usw2"
+  SPOKE_CLUSTER: "opsera-usw2-np"
+  ECR_REPO: "opsera/healthcp-test-0220-725d6"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  bootstrap:
+    name: "Bootstrap Infrastructure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Get AWS Account ID
+        id: aws-info
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$AWS_ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "ecr_registry=$AWS_ACCOUNT_ID.dkr.ecr.us-west-2.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Create ECR repository (idempotent)
+        run: |
+          REPO_NAME="${{ env.ECR_REPO }}"
+          if aws ecr describe-repositories --repository-names "$REPO_NAME" --region us-west-2 2>/dev/null; then
+            echo "ECR repository $REPO_NAME already exists"
+          else
+            aws ecr create-repository \
+              --repository-name "$REPO_NAME" \
+              --region us-west-2 \
+              --image-scanning-configuration scanOnPush=false \
+              --tags Key=managed-by,Value=opsera Key=app,Value=${{ env.APP_NAME }} Key=env,Value=${{ env.ENV }}
+            echo "Created ECR repository: $REPO_NAME"
+          fi
+
+      - name: Configure kubectl for HUB cluster (ArgoCD)
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.HUB_CLUSTER }}" \
+            --region us-west-2 \
+            --alias hub
+
+      - name: Verify ArgoCD connectivity
+        run: |
+          kubectl --context hub get pods -n argocd | grep -E "argocd-server" || {
+            echo "WARNING: ArgoCD server not found on hub cluster. Check cluster config."
+            exit 1
+          }
+          echo "ArgoCD is running on hub cluster"
+
+      - name: Register repository with ArgoCD (idempotent)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          REPO_URL=$(git remote get-url origin)
+          REPO_URL=$(echo "$REPO_URL" \
+            | sed 's|git@github\.com:|https://github.com/|' \
+            | sed 's|\.git$||')
+          if ! echo "$REPO_URL" | grep -q "^https://"; then
+            echo "Repo URL is not HTTPS: $REPO_URL"
+            exit 1
+          fi
+          echo "Registering repo (HTTPS): $REPO_URL"
+          SECRET_NAME="repo-$(echo '${{ env.APP_NAME }}' | tr '[:upper:]' '[:lower:]')"
+          kubectl --context hub apply -f - <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ${SECRET_NAME}
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: "${REPO_URL}"
+            username: git
+            password: "${GH_PAT}"
+          EOF
+          echo "Repository registered with ArgoCD: $REPO_URL (secret: ${SECRET_NAME})"
+
+      - name: Configure kubectl for SPOKE cluster (workloads)
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ env.SPOKE_CLUSTER }}" \
+            --region us-west-2 \
+            --alias spoke
+
+      - name: Create namespace on SPOKE (idempotent)
+        run: |
+          kubectl --context spoke create namespace "${{ env.NAMESPACE }}" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "Namespace ${{ env.NAMESPACE }} ready"
+
+      - name: Create ServiceAccount on SPOKE (idempotent)
+        run: |
+          kubectl --context spoke create serviceaccount "${{ env.APP_NAME }}" \
+            -n "${{ env.NAMESPACE }}" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "ServiceAccount ready"
+
+      - name: Create ECR pull secret on SPOKE (idempotent)
+        run: |
+          AWS_ACCOUNT_ID="${{ steps.aws-info.outputs.account_id }}"
+          ECR_REGISTRY="${{ steps.aws-info.outputs.ecr_registry }}"
+          ECR_PASSWORD=$(aws ecr get-login-password --region us-west-2)
+          kubectl --context spoke create secret docker-registry ecr-secret \
+            --namespace "${{ env.NAMESPACE }}" \
+            --docker-server="$ECR_REGISTRY" \
+            --docker-username=AWS \
+            --docker-password="$ECR_PASSWORD" \
+            --dry-run=client -o yaml | kubectl --context spoke apply -f -
+          echo "ECR pull secret created/updated in ${{ env.NAMESPACE }}"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "BOOTSTRAP COMPLETE"
+          echo "ECR Repository:  ${{ env.ECR_REPO }}"
+          echo "Namespace:       ${{ env.NAMESPACE }}"
+          echo "Hub Cluster:     ${{ env.HUB_CLUSTER }}"
+          echo "Spoke Cluster:   ${{ env.SPOKE_CLUSTER }}"
+          echo "Infrastructure ready for CI/CD deployment"
