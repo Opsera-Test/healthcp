@@ -11,8 +11,8 @@ labels:
     includeSelectors: false
 images:
   - name: hcp-feb20
-    newName: UNKNOWN.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-feb20
-    newTag: latest
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-feb20
+    newTag: 0b0e6513
 patches:
   - target:
       kind: Ingress
