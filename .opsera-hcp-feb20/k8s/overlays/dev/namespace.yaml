@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-hcp-feb20-dev
+  labels:
+    app: hcp-feb20
+    environment: dev
+    tenant: opsera

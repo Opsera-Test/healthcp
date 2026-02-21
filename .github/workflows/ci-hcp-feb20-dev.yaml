@@ -1,0 +1,334 @@
+name: CI/CD Pipeline - hcp-feb20
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'app.py'
+      - 'index.js'
+      - 'main.go'
+      - 'requirements.txt'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.opsera-hcp-feb20/k8s/**'
+      - '.github/workflows/ci-hcp-feb20-dev.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'app.py'
+      - 'index.js'
+      - 'main.go'
+      - 'requirements.txt'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.opsera-hcp-feb20/k8s/**'
+  workflow_dispatch:
+
+env:
+  APP_NAME: hcp-feb20
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  ECR_REPO: opsera/hcp-feb20
+  PIPELINE_API: ${{ secrets.PIPELINE_API_URL }}
+  SESSION_ID: ${{ github.event.repository.name }}-${{ github.run_id }}
+  KUSTOMIZE_FILE: .opsera-hcp-feb20/k8s/overlays/dev/kustomization.yaml
+  ARGOCD_APP: hcp-feb20-dev
+  APP_URL: https://hcp-feb20-dev.agent.opsera.dev
+
+permissions:
+  contents: write
+  id-token: write
+  security-events: write
+
+jobs:
+  validate-branch-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch protection
+        run: |
+          PROTECTION=$(gh api repos/${{ github.repository }}/branches/main/protection 2>/dev/null || echo "none")
+          if [ "$PROTECTION" = "none" ]; then
+            echo "⚠️  WARNING: Branch protection not enabled on main"
+            echo "   Enable branch protection: Settings → Branches → Add rule"
+          else
+            echo "✓ Branch protection enabled"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: validate-branch-protection
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      ecr_uri: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Notify Mission Control — start
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'phase_start','source':'setup','message':'Pipeline started'}); post({'type':'cmd','source':'setup','message':'Triggered by ${{ github.actor }} — commit ${{ github.sha }}','badge':'CMD'}); post({'type':'config','source':'setup','message':'Session configured','app':'hcp-feb20','env':'dev','namespace':'opsera-hcp-feb20-dev','hub':'argocd-usw2','spoke':'opsera-usw2-np','domain':'agent.opsera.dev','endpoint':'hcp-feb20-dev.agent.opsera.dev'})" || true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: meta
+        run: |
+          IMAGE_TAG="${GITHUB_SHA::8}"
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $IMAGE_TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Notify Mission Control — image pushed
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'cmd','source':'ecr-push','message':'Image pushed: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.meta.outputs.image_tag }}','badge':'CMD'})" || true
+
+      - name: Update kustomization with new image
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Retry logic for git operations to handle concurrent pipelines
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+
+            sed -i "s|newTag:.*|newTag: ${{ steps.meta.outputs.image_tag }}|" "${{ env.KUSTOMIZE_FILE }}"
+            sed -i "s|newName:.*|newName: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}|" "${{ env.KUSTOMIZE_FILE }}"
+
+            git add "${{ env.KUSTOMIZE_FILE }}"
+            if git diff --cached --quiet; then
+              echo "No changes needed"
+              exit 0
+            fi
+
+            git commit -m "chore(hcp-feb20): Update image to ${{ steps.meta.outputs.image_tag }}"
+
+            if git push origin HEAD:main; then
+              echo "✓ Successfully pushed on attempt $attempt"
+              exit 0
+            fi
+
+            echo "⚠ Push failed on attempt $attempt, retrying..."
+            sleep $((attempt * 2))
+          done
+
+          echo "❌ Failed to push after 5 attempts"
+          exit 1
+
+      - name: Notify Mission Control — build complete
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'phase_complete','source':'docker-build','message':'Build and push complete'})" || true
+
+  security-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog secrets scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+      - name: Notify Mission Control — security scan
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'scan','source':'security','message':'Security scan complete','badge':'SCAN'})" || true
+
+  scan-image:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.ecr_uri }}:${{ needs.build.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.build.outputs.ecr_uri }}:${{ needs.build.outputs.image_tag }}
+          format: cyclonedx-json
+          output-file: sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ needs.build.outputs.image_tag }}
+          path: sbom.json
+
+      - name: Notify Mission Control — image scan
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'scan','source':'trivy','message':'Image vulnerability scan complete','badge':'SCAN'})" || true
+
+  deploy:
+    needs: [build, scan-image]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Notify Mission Control — deploy start
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'phase_start','source':'argocd-sync','message':'Triggering ArgoCD sync'})" || true
+
+      - name: Update kubeconfig for hub cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD refresh
+        continue-on-error: true
+        run: |
+          kubectl annotate application ${{ env.ARGOCD_APP }} \
+            -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Wait for ArgoCD sync (on hub cluster)
+        run: |
+          for i in {1..60}; do
+            SYNC_STATUS=$(kubectl get application ${{ env.ARGOCD_APP }} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH_STATUS=$(kubectl get application ${{ env.ARGOCD_APP }} -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "Attempt $i/60: Sync=$SYNC_STATUS Health=$HEALTH_STATUS"
+            if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+              echo "✓ Application synced and healthy"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "❌ Timeout waiting for ArgoCD sync after 5 minutes"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Switch kubectl context to spoke cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl config current-context
+
+      - name: Validate deployment (on spoke cluster)
+        run: |
+          kubectl wait --for=condition=available --timeout=5m \
+            deployment/${{ env.APP_NAME }} -n ${{ env.APP_NAME }}-dev
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against ${{ env.APP_URL }}"
+
+          # Test 1: Health endpoint
+          for i in {1..30}; do
+            if curl -f -s --max-time 5 "${{ env.APP_URL }}/health" > /dev/null; then
+              echo "✓ Health check passed"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Health check failed after 30 attempts"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Test 2: Root endpoint returns 200
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.APP_URL }}")
+          if [ "$STATUS" = "200" ]; then
+            echo "✓ Root endpoint returned 200"
+          else
+            echo "❌ Root endpoint returned $STATUS"
+            exit 1
+          fi
+
+          # Test 3: Response time check
+          RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}\n' "${{ env.APP_URL }}")
+          if (( $(echo "$RESPONSE_TIME < 2.0" | bc -l) )); then
+            echo "✓ Response time: ${RESPONSE_TIME}s"
+          else
+            echo "⚠️  WARNING: Slow response time: ${RESPONSE_TIME}s"
+          fi
+
+          echo "✓ All smoke tests passed"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed, initiating rollback"
+          python3 scripts/rollback.py ${{ env.APP_NAME }} ${{ env.APP_NAME }}-dev || echo "⚠️  Rollback failed, manual intervention required"
+
+      - name: Notify Mission Control — milestone
+        run: |
+          python3 -c "import urllib.request,json,os; url=os.environ['PIPELINE_API']+'/api/sessions/'+os.environ['SESSION_ID']+'/events'; post=lambda e: urllib.request.urlopen(urllib.request.Request(url,json.dumps(e).encode(),{'Content-Type':'application/json'},method='POST'),timeout=5); post({'type':'milestone','source':'reports','message':'Deployment complete! CI/CD pipeline succeeded'})" || true
+
+      - name: Print deployment summary
+        run: |
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "║  DEPLOYMENT COMPLETE                                 ║"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "║  App        hcp-feb20"
+          echo "║  Image      ${{ needs.build.outputs.ecr_uri }}:${{ needs.build.outputs.image_tag }}"
+          echo "║  Namespace  opsera-hcp-feb20-dev"
+          echo "║  App URL    ${{ env.APP_URL }}"
+          echo "╚══════════════════════════════════════════════════════╝"

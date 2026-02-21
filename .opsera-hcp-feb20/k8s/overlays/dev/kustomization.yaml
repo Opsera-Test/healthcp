@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: opsera-hcp-feb20-dev
+resources:
+  - ../../base
+  - namespace.yaml
+labels:
+  - pairs:
+      environment: dev
+      tenant: opsera
+    includeSelectors: false
+images:
+  - name: hcp-feb20
+    newName: UNKNOWN.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-feb20
+    newTag: latest
+patches:
+  - target:
+      kind: Ingress
+      name: hcp-feb20
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: hcp-feb20-dev.agent.opsera.dev

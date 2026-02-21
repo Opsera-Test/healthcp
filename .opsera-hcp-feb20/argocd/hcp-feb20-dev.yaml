@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hcp-feb20-dev
+  namespace: argocd
+  labels:
+    app: hcp-feb20
+    environment: dev
+    tenant: opsera
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Opsera-Test/healthcp.git
+    targetRevision: main
+    path: .opsera-hcp-feb20/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-hcp-feb20-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=true
+    automated:
+      prune: true
+      selfHeal: true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
