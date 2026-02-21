@@ -15,7 +15,6 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
-      - '.opsera-hcp-feb20/k8s/**'
       - '.github/workflows/ci-hcp-feb20-dev.yaml'
   pull_request:
     branches:
@@ -31,7 +30,6 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
-      - '.opsera-hcp-feb20/k8s/**'
   workflow_dispatch:
 
 env:
@@ -140,7 +138,7 @@ jobs:
               exit 0
             fi
 
-            git commit -m "chore(hcp-feb20): Update image to ${{ steps.meta.outputs.image_tag }}"
+            git commit -m "chore(hcp-feb20): Update image to ${{ steps.meta.outputs.image_tag }} [skip ci]"
 
             if git push origin HEAD:main; then
               echo "✓ Successfully pushed on attempt $attempt"
