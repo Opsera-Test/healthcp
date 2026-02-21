@@ -12,7 +12,7 @@ labels:
 images:
   - name: hcp-feb20
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-feb20
-    newTag: 0b0e6513
+    newTag: 979cf095
 patches:
   - target:
       kind: Ingress
