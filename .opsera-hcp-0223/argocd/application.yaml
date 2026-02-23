@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hcp-0223-dev
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: hcp-0223
+    app.kubernetes.io/part-of: hcp-0223
+    environment: dev
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Opsera-Test/healthcp.git
+    targetRevision: main
+    path: .opsera-hcp-0223/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-hcp-0223-dev
+  syncPolicy:
+    automated: null
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

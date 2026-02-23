@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hcp-0223
+  namespace: opsera-hcp-0223-dev
+  labels:
+    app: hcp-0223
+    environment: dev
+    tenant: opsera
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hcp-0223
+  template:
+    metadata:
+      labels:
+        app: hcp-0223
+        environment: dev
+        tenant: opsera
+    spec:
+      serviceAccountName: hcp-0223-sa
+      containers:
+        - name: hcp-0223
+          image: PLACEHOLDER_ECR_URI:PLACEHOLDER_IMAGE_TAG
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: ENVIRONMENT
+              value: dev
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+      imagePullSecrets:
+        - name: ecr-pull-secret
