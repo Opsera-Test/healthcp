@@ -1,0 +1,6 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcp-test-0223-e5742
+spec:
+  replicas: 2

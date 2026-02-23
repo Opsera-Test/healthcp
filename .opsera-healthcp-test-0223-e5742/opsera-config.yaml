@@ -1,0 +1,30 @@
+app:
+  name: healthcp-test-0223-e5742
+  type: frontend
+  framework: react-vite
+  port: 8080
+
+deployment:
+  tenant: opsera
+  environment: dev
+  cloud: aws
+  region: us-west-2
+  branch: main
+  strategy: rolling
+
+clusters:
+  hub: argocd-usw2
+  spoke: opsera-usw2-np
+
+networking:
+  domain: agent.opsera.dev
+  url: https://healthcp-test-0223-e5742.agent.opsera.dev
+
+container:
+  registry: ecr
+  repository: opsera/healthcp-test-0223-e5742
+  baseImage: nginxinc/nginx-unprivileged:alpine
+
+generated:
+  by: opsera-vibe-shift-v1.0
+  date: "2026-02-23"
