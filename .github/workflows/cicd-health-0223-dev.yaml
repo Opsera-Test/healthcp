@@ -104,7 +104,7 @@ jobs:
       - name: Set image tag
         id: tag
         run: |
-          TAG="${{ env.ENV }}-${{ github.sha | head -c 8 }}-$(date +%Y%m%d%H%M%S)"
+          TAG="${{ env.ENV }}-${GITHUB_SHA::8}-$(date +%Y%m%d%H%M%S)"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
 
