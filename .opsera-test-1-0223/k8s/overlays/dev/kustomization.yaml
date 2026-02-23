@@ -10,4 +10,4 @@ resources:
 images:
   - name: PLACEHOLDER_ECR_URI
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/test-1-0223
-    newTag: dev-7380388d-20260223222518
+    newTag: dev-4510da91-20260223223339
