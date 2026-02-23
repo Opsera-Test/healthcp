@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: opsera-health-0223-dev
-  labels:
-    app: health-0223
-    environment: dev
-    tenant: opsera
-    managed-by: argocd
