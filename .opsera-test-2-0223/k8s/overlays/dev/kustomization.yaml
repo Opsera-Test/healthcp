@@ -6,6 +6,7 @@ namespace: opsera-test-2-0223-dev
 resources:
   - ../../base
   - namespace.yaml
+  - ingress.yaml
 
 images:
   - name: PLACEHOLDER_ECR_URI
