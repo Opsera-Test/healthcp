@@ -16,6 +16,6 @@ labels:
       tenant: opsera
 
 images:
-  - name: PLACEHOLDER_ECR_URI
-    newName: PLACEHOLDER_ECR_URI
-    newTag: PLACEHOLDER_IMAGE_TAG
+  - name: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0223
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0223
+    newTag: dev-34036f1c-20260223213714
