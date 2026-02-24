@@ -10,5 +10,5 @@ resources:
 
 images:
   - name: PLACEHOLDER_ECR_URI
-    newName: PLACEHOLDER_ECR_URI
-    newTag: PLACEHOLDER_IMAGE_TAG
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/test-5-0223
+    newTag: dev-94212f43-20260224001011
