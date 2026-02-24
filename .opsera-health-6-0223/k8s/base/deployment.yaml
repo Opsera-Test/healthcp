@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-6-0223
+  labels:
+    app: health-6-0223
+    managed-by: opsera-c2c
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: health-6-0223
+  template:
+    metadata:
+      labels:
+        app: health-6-0223
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/health"
+    spec:
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: health-6-0223
+          image: PLACEHOLDER_ECR_URI
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NEW_RELIC_APP_NAME
+              value: "opsera-health-6-0223-app-dev"
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: newrelic-license
+                  key: license-key
+                  optional: true
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_SERVICE
+              value: "health-6-0223"
+            - name: DD_ENV
+              value: "dev"
+            - name: DD_VERSION
+              value: "latest"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            allowPrivilegeEscalation: false
