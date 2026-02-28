@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-1
+  labels:
+    app: test-1
+    managed-by: opsera-c2c
+spec:
+  selector:
+    app: test-1
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP

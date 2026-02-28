@@ -1,0 +1,24 @@
+app: test-1
+tenant: opsera
+version: "1.0.0"
+generated_by: "Opsera Code-to-Cloud Enterprise v0.934"
+generated_at: "2026-02-28"
+
+cloud:
+  provider: aws
+  region: us-west-2
+
+clusters:
+  hub: argocd-usw2
+  spoke: opsera-usw2-np
+
+environments:
+  - name: dev
+    namespace: opsera-test-1-dev
+    ingress: test-1-dev.agent.opsera.dev
+    strategy: rolling
+
+container:
+  port: 8080
+  registry: ecr
+  repo: test-1
