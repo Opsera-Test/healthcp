@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hcp-0305
+  labels:
+    app: hcp-0305
+    tenant: opsera
+    environment: dev
+  annotations:
+    # RULE 11: Both annotation AND spec.ingressClassName required
+    kubernetes.io/ingress.class: nginx
+    # RULE 11: NO TLS section — HTTPS handled at controller level
+    # RULE 11: NO cert-manager annotations (RULE 233)
+spec:
+  ingressClassName: nginx
+  rules:
+    # RULE 10: hostname = {app}-{env}.agent.opsera.dev (ONE level under domain)
+    # wildcard *.agent.opsera.dev covers exactly ONE subdomain level
+    - host: hcp-0305-dev.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hcp-0305
+                port:
+                  number: 80

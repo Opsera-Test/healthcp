@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base resources — shared across ALL environments
+# RULE 1: NO namespace field in base manifests (overlays inject namespace)
+# RULE 2: Overlay files from base go under patches:, NOT resources:
+resources:
+  - serviceaccount.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml

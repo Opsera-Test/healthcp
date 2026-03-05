@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# RULE 2: namespace injected at overlay level (NOT in base)
+namespace: opsera-hcp-0305-dev
+
+resources:
+  # Reference base (shared resources)
+  - ../../base
+  # NEW resources not in base — go under resources: (not patches:)
+  - namespace.yaml
+  - ingress.yaml
+
+# RULE 9: Kustomize image transformation — CI/CD updates newName + newTag on every deploy
+images:
+  - name: PLACEHOLDER_ECR_URI
+    newName: PLACEHOLDER_ECR_URI
+    newTag: v1.0.0
+
+# Rolling deployment — dev environment (replicas: 1)
+replicas:
+  - name: hcp-0305
+    count: 1
+
+# RULE: Use labels with includeSelectors: false (NOT commonLabels — causes immutable selector errors)
+labels:
+  - pairs:
+      environment: dev
+      tenant: opsera
+    includeSelectors: false

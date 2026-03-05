@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hcp-0305
+  labels:
+    app: hcp-0305
+    tenant: opsera
+# RULE 1: NO namespace field — overlays inject namespace via kustomization
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hcp-0305
+  template:
+    metadata:
+      labels:
+        app: hcp-0305
+        tenant: opsera
+    spec:
+      serviceAccountName: hcp-0305
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+      containers:
+        - name: hcp-0305
+          # RULE 9: Use PLACEHOLDER_ECR_URI — kustomize overlay replaces with real image + tag
+          image: PLACEHOLDER_ECR_URI
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          imagePullPolicy: Always
+      imagePullSecrets:
+        - name: ecr-registry-secret
