@@ -15,7 +15,7 @@ resources:
 images:
 - name: PLACEHOLDER_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/hcp-0305
-  newTag: dev-392218f-20260306010007
+  newTag: dev-808b8a0-20260306224149
 
 # Rolling deployment — dev environment (replicas: 1)
 replicas:
