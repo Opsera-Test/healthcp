@@ -395,7 +395,7 @@ jobs:
             --name ${{ env.HUB_CLUSTER }} \
             --region ${{ env.AWS_REGION }}
 
-      - name: Trigger ArgoCD Hard Refresh
+      - name: Run Hard Refresh
         run: |
           kubectl patch app opsera-healthcp-dev -n argocd --type merge \
             -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
@@ -426,10 +426,10 @@ jobs:
             --name ${{ env.HUB_CLUSTER }} \
             --region ${{ env.AWS_REGION }}
 
-      - name: Trigger ArgoCD Sync
+      - name: Run ArgoCD Sync
         run: |
           kubectl patch app opsera-healthcp-dev -n argocd --type merge \
-            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD"}}}'
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD","force":true}}}'
           echo "✅ ArgoCD sync triggered"
 
       - name: Wait for Sync to Complete
