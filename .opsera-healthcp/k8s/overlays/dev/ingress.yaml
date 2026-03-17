@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: healthcp
+spec:
+  rules:
+    # RULE 10: Hostname MUST be {app}-{env}.agent.opsera.dev (ONE level under domain)
+    # NEVER include spoke cluster name in hostname
+    - host: healthcp-dev.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: healthcp
+                port:
+                  number: 80

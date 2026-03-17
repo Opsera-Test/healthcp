@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcp
+  # RULE 1: NO namespace field in base (kustomize overlay injects it)
+  labels:
+    app: healthcp
+    tenant: opsera
+    managed-by: opsera-c2c
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healthcp
+  template:
+    metadata:
+      labels:
+        app: healthcp
+        tenant: opsera
+    spec:
+      serviceAccountName: healthcp
+      # RULE 9: ECR pull secret for private registry
+      imagePullSecrets:
+        - name: ecr-registry-secret
+      containers:
+        - name: healthcp
+          # RULE 9: Use PLACEHOLDER_ECR_URI - kustomize replaces with real ECR URI + tag
+          image: PLACEHOLDER_ECR_URI
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          # Liveness probe against /health endpoint (nginx.conf provides it)
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+      securityContext:
+        fsGroup: 101
