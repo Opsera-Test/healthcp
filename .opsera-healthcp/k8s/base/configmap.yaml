@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: healthcp-config
+  labels:
+    app: healthcp
+    tenant: opsera
+data:
+  APP_NAME: "healthcp"
+  LOG_LEVEL: "info"

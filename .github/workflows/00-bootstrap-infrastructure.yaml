@@ -1,0 +1,350 @@
+name: "00 - Bootstrap: Enterprise Infrastructure"
+
+on:
+  workflow_dispatch:
+    inputs:
+      TENANT:
+        description: 'Tenant name'
+        required: false
+        default: 'opsera'
+      APP_NAME:
+        description: 'Application name'
+        required: true
+        default: 'healthcp'
+      ENVIRONMENT:
+        description: 'Target environment'
+        required: false
+        default: 'dev'
+      AWS_REGION:
+        description: 'AWS Region'
+        required: false
+        default: 'us-west-2'
+      mode:
+        description: 'Setup mode (quick/recommended)'
+        required: false
+        default: 'quick'
+      cloud_provider:
+        description: 'Cloud provider (aws/azure/gcp)'
+        required: false
+        default: 'aws'
+
+env:
+  TENANT: ${{ inputs.TENANT || 'opsera' }}
+  APP_NAME: ${{ inputs.APP_NAME || 'healthcp' }}
+  ENVIRONMENT: ${{ inputs.ENVIRONMENT || 'dev' }}
+  AWS_REGION: ${{ inputs.AWS_REGION || 'us-west-2' }}
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+jobs:
+  # ── Job 01: Pre-flight Checks ──────────────────────────────────────────────
+  preflight:
+    name: "01 - Pre-flight Checks"
+    runs-on: ubuntu-latest
+    outputs:
+      aws_account_id: ${{ steps.aws-info.outputs.account_id }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get AWS Account Info
+        id: aws-info
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
+          echo "✅ AWS Account: ${ACCOUNT_ID}"
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Check Hub EKS Cluster
+        run: |
+          aws eks describe-cluster --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }} \
+            --query 'cluster.status' --output text
+          echo "✅ Hub cluster reachable: ${{ env.HUB_CLUSTER }}"
+
+      - name: Check Spoke EKS Cluster
+        run: |
+          aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} \
+            --query 'cluster.status' --output text
+          echo "✅ Spoke cluster reachable: ${{ env.SPOKE_CLUSTER }}"
+
+      - name: Setup Hub Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} \
+            --alias hub
+
+      - name: Check ArgoCD Namespace
+        run: |
+          if kubectl --context hub get namespace argocd &>/dev/null; then
+            echo "✅ ArgoCD namespace exists"
+          else
+            echo "❌ ArgoCD namespace not found on hub cluster"
+            exit 1
+          fi
+
+  # ── Job 02: ECR Repositories ───────────────────────────────────────────────
+  ecr-setup:
+    name: "02 - ECR Repositories"
+    runs-on: ubuntu-latest
+    needs: [preflight]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create ECR Repository (Idempotent)
+        run: |
+          ECR_REPO_NAME="${{ env.TENANT }}/${{ env.APP_NAME }}"
+
+          if aws ecr describe-repositories --repository-names "${ECR_REPO_NAME}" \
+              --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "✅ ECR repository already exists: ${ECR_REPO_NAME}"
+          else
+            aws ecr create-repository \
+              --repository-name "${ECR_REPO_NAME}" \
+              --image-tag-mutability IMMUTABLE \
+              --encryption-configuration encryptionType=AES256 \
+              --region ${{ env.AWS_REGION }} \
+              --tags \
+                Key=tenant,Value=${{ env.TENANT }} \
+                Key=app,Value=${{ env.APP_NAME }} \
+                Key=managed-by,Value=opsera-c2c
+            echo "✅ ECR repository created: ${ECR_REPO_NAME}"
+          fi
+
+  # ── Job 03: ArgoCD Configuration ──────────────────────────────────────────
+  argocd-setup:
+    name: "03 - ArgoCD Configuration"
+    runs-on: ubuntu-latest
+    needs: [preflight, ecr-setup]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Setup Hub Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} \
+            --alias hub
+
+      - name: Register Spoke Cluster in ArgoCD (Idempotent)
+        run: |
+          CLUSTER_SECRET_NAME="cluster-${{ env.SPOKE_CLUSTER }}"
+
+          if kubectl --context hub get secret "${CLUSTER_SECRET_NAME}" -n argocd &>/dev/null; then
+            echo "✅ Spoke cluster already registered: ${{ env.SPOKE_CLUSTER }}"
+          else
+            echo "Registering spoke cluster with ArgoCD..."
+
+            SPOKE_SERVER=$(aws eks describe-cluster \
+              --name ${{ env.SPOKE_CLUSTER }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'cluster.endpoint' --output text)
+
+            SPOKE_CA=$(aws eks describe-cluster \
+              --name ${{ env.SPOKE_CLUSTER }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'cluster.certificateAuthority.data' --output text)
+
+            aws eks update-kubeconfig \
+              --name ${{ env.SPOKE_CLUSTER }} \
+              --region ${{ env.AWS_REGION }} \
+              --alias spoke
+
+            kubectl --context spoke create serviceaccount argocd-manager \
+              -n kube-system --dry-run=client -o yaml | \
+              kubectl --context spoke apply -f -
+
+            kubectl --context spoke create clusterrolebinding argocd-manager \
+              --clusterrole=cluster-admin \
+              --serviceaccount=kube-system:argocd-manager \
+              --dry-run=client -o yaml | \
+              kubectl --context spoke apply -f -
+
+            TOKEN=$(kubectl --context spoke create token argocd-manager \
+              -n kube-system --duration=87600h)
+
+            cat <<EOF | kubectl --context hub apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ${CLUSTER_SECRET_NAME}
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: cluster
+          type: Opaque
+          stringData:
+            name: "${{ env.SPOKE_CLUSTER }}"
+            server: "${SPOKE_SERVER}"
+            config: |
+              {
+                "bearerToken": "${TOKEN}",
+                "tlsClientConfig": {
+                  "insecure": false,
+                  "caData": "${SPOKE_CA}"
+                }
+              }
+          EOF
+
+            echo "✅ Spoke cluster registered: ${{ env.SPOKE_CLUSTER }}"
+          fi
+
+      - name: Setup ArgoCD Repository Secret (Idempotent)
+        run: |
+          GITHUB_OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          APP_LOWER=$(echo "${{ env.APP_NAME }}" | tr '[:upper:]' '[:lower:]')
+          REPO_SECRET_NAME="repo-${GITHUB_OWNER_LOWER}-${APP_LOWER}"
+
+          if kubectl --context hub get secret "${REPO_SECRET_NAME}" -n argocd &>/dev/null; then
+            echo "✅ Repository secret already exists"
+          else
+            cat <<EOF | kubectl --context hub apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ${REPO_SECRET_NAME}
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          type: Opaque
+          stringData:
+            type: git
+            url: https://github.com/${{ github.repository }}.git
+            password: ${{ secrets.GH_PAT }}
+            username: git
+          EOF
+            echo "✅ Repository registered with ArgoCD"
+          fi
+
+  # ── Job 04: Kubernetes Setup ───────────────────────────────────────────────
+  k8s-setup:
+    name: "04 - Kubernetes Setup"
+    runs-on: ubuntu-latest
+    needs: [preflight, argocd-setup]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Setup Spoke Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} \
+            --alias spoke
+
+      - name: Setup Namespaces (Idempotent)
+        run: |
+          for ENV in dev; do
+            NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+
+            if kubectl --context spoke get namespace "${NAMESPACE}" &>/dev/null; then
+              echo "✅ Namespace already exists: ${NAMESPACE}"
+            else
+              kubectl --context spoke create namespace "${NAMESPACE}"
+              kubectl --context spoke label namespace "${NAMESPACE}" \
+                tenant=${{ env.TENANT }} \
+                app=${{ env.APP_NAME }} \
+                environment=${ENV} \
+                managed-by=opsera-c2c
+              echo "✅ Namespace created: ${NAMESPACE}"
+            fi
+          done
+
+  # ── Job 05: Verification ───────────────────────────────────────────────────
+  verify:
+    name: "05 - Verification"
+    runs-on: ubuntu-latest
+    needs: [preflight, ecr-setup, argocd-setup, k8s-setup]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Verify ECR Repository
+        run: |
+          ECR_REPO_NAME="${{ env.TENANT }}/${{ env.APP_NAME }}"
+          aws ecr describe-repositories \
+            --repository-names "${ECR_REPO_NAME}" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'repositories[0].repositoryUri' --output text
+          echo "✅ ECR repository verified"
+
+      - name: Verify Namespaces on Spoke
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} \
+            --alias spoke
+
+          NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-dev"
+          kubectl --context spoke get namespace "${NAMESPACE}"
+          echo "✅ Namespace verified: ${NAMESPACE}"
+
+      - name: Verify ArgoCD Cluster Registration
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} \
+            --alias hub
+
+          kubectl --context hub get secret \
+            "cluster-${{ env.SPOKE_CLUSTER }}" \
+            -n argocd
+          echo "✅ Spoke cluster registered in ArgoCD"
+
+      - name: Bootstrap Summary
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║  BOOTSTRAP COMPLETE ✅                                   ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║  App:        ${{ env.APP_NAME }}"
+          echo "║  Tenant:     ${{ env.TENANT }}"
+          echo "║  Region:     ${{ env.AWS_REGION }}"
+          echo "║  ECR:        ${{ env.TENANT }}/${{ env.APP_NAME }}"
+          echo "║  Namespace:  ${{ env.TENANT }}-${{ env.APP_NAME }}-dev"
+          echo "║"
+          echo "║  Next Step: Run cicd-healthcp-dev workflow"
+          echo "╚══════════════════════════════════════════════════════════╝"

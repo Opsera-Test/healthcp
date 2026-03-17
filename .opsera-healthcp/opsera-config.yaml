@@ -1,0 +1,15 @@
+app_name: healthcp
+tenant: opsera
+cloud_provider: aws
+region: us-west-2
+region_short: usw2
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+argocd_server: argocd-usw2.agent.opsera.dev
+mode: quick
+deployment_strategy: rolling
+environments:
+  - dev
+ecr_repo: opsera/healthcp
+domain: agent.opsera.dev
+generated_by: opsera-code-to-cloud-enterprise-v0.934

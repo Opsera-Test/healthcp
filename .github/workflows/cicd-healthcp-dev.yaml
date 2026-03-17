@@ -1,0 +1,561 @@
+name: "CI/CD - healthcp - Dev"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.opsera-healthcp/**'
+      - '!.opsera-healthcp/k8s/**'
+      - '!.opsera-healthcp/argocd/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package*.json'
+      - 'nginx.conf'
+      - '.github/workflows/cicd-healthcp-dev.yaml'
+  workflow_dispatch:
+
+env:
+  TENANT: opsera
+  APP_NAME: healthcp
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  NAMESPACE: opsera-healthcp-dev
+  ARGOCD_APP_NAME: opsera-healthcp-dev
+
+permissions:
+  contents: write
+  id-token: write
+  security-events: write
+
+jobs:
+  # ── Stage 1: Prerequisites Check ──────────────────────────────────────────
+  check-bootstrap-prerequisites:
+    name: "01 - Check Bootstrap Prerequisites"
+    runs-on: ubuntu-latest
+    outputs:
+      aws_account_id: ${{ steps.aws-info.outputs.account_id }}
+      ecr_uri: ${{ steps.aws-info.outputs.ecr_uri }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get AWS Account Info
+        id: aws-info
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.TENANT }}/${{ env.APP_NAME }}"
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
+          echo "ecr_uri=${ECR_URI}" >> $GITHUB_OUTPUT
+          echo "✅ AWS Account: ${ACCOUNT_ID}"
+          echo "✅ ECR URI: ${ECR_URI}"
+
+      - name: Verify ECR Repository Exists
+        run: |
+          if ! aws ecr describe-repositories \
+              --repository-names "${{ env.TENANT }}/${{ env.APP_NAME }}" \
+              --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            echo "❌ ECR repository not found. Run bootstrap workflow first."
+            exit 1
+          fi
+          echo "✅ ECR repository verified"
+
+  # ── Stage 2: Security Scan (parallel with build) ───────────────────────────
+  security-scan:
+    name: "02 - Security Scan (Gitleaks)"
+    runs-on: ubuntu-latest
+    needs: [check-bootstrap-prerequisites]
+    continue-on-error: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ── Stage 3: Build Image ──────────────────────────────────────────────────
+  build-image:
+    name: "03 - Build Docker Image"
+    runs-on: ubuntu-latest
+    needs: [check-bootstrap-prerequisites]
+    outputs:
+      image_tag: ${{ steps.set-tag.outputs.image_tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Image Tag
+        id: set-tag
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          IMAGE_TAG="dev-${SHORT_SHA}-${TIMESTAMP}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "✅ Image tag: ${IMAGE_TAG}"
+
+      - name: Build Docker Image
+        run: |
+          ECR_URI="${{ needs.check-bootstrap-prerequisites.outputs.ecr_uri }}"
+          IMAGE_TAG="${{ steps.set-tag.outputs.image_tag }}"
+
+          docker build \
+            -f .opsera-healthcp/Dockerfile \
+            -t "${ECR_URI}:${IMAGE_TAG}" \
+            .
+
+          echo "✅ Docker image built: ${ECR_URI}:${IMAGE_TAG}"
+
+      - name: Save Image for Grype Scan
+        run: |
+          ECR_URI="${{ needs.check-bootstrap-prerequisites.outputs.ecr_uri }}"
+          IMAGE_TAG="${{ steps.set-tag.outputs.image_tag }}"
+
+          docker save "${ECR_URI}:${IMAGE_TAG}" | gzip > /tmp/image.tar.gz
+          echo "✅ Image saved for scanning"
+
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/image.tar.gz
+          retention-days: 1
+
+  # ── Stage 4: Grype Container Scan ─────────────────────────────────────────
+  grype-scan:
+    name: "04 - Grype Container Scan"
+    runs-on: ubuntu-latest
+    needs: [build-image]
+    continue-on-error: true
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker Image
+        run: |
+          docker load < /tmp/image.tar.gz
+          echo "✅ Image loaded for scanning"
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
+            sh -s -- -b /usr/local/bin
+
+      - name: Run Grype Vulnerability Scan
+        run: |
+          ECR_URI="${{ needs.check-bootstrap-prerequisites.outputs.ecr_uri }}"
+          IMAGE_TAG="${{ needs.build-image.outputs.image_tag }}"
+
+          grype "${ECR_URI}:${IMAGE_TAG}" \
+            --output sarif \
+            --file grype-results.sarif \
+            --fail-on high || true
+
+          grype "${ECR_URI}:${IMAGE_TAG}" \
+            --output table || true
+
+          echo "✅ Grype scan complete (warn-only mode)"
+
+      - name: Upload Grype SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: grype-results.sarif
+
+      - name: Upload Grype Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grype-scan-report
+          path: grype-results.sarif
+          retention-days: 30
+
+  # ── Stage 5: Push to ECR ──────────────────────────────────────────────────
+  push-to-ecr:
+    name: "05 - Push to ECR"
+    runs-on: ubuntu-latest
+    needs: [build-image, grype-scan]
+    if: always() && needs.build-image.result == 'success'
+    outputs:
+      image_tag: ${{ needs.build-image.outputs.image_tag }}
+    steps:
+      - name: Download Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker Image
+        run: docker load < /tmp/image.tar.gz
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            docker login --username AWS --password-stdin \
+            "${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+
+      - name: Push Image to ECR
+        run: |
+          ECR_URI="${{ needs.check-bootstrap-prerequisites.outputs.ecr_uri }}"
+          IMAGE_TAG="${{ needs.build-image.outputs.image_tag }}"
+
+          docker push "${ECR_URI}:${IMAGE_TAG}"
+          echo "✅ Pushed: ${ECR_URI}:${IMAGE_TAG}"
+
+  # ── Stage 6: Update Manifests ─────────────────────────────────────────────
+  update-manifests:
+    name: "06 - Update Manifests"
+    runs-on: ubuntu-latest
+    needs: [check-bootstrap-prerequisites, build-image, push-to-ecr]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Update Kustomization Image Tag
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.TENANT }}/${{ env.APP_NAME }}"
+          IMAGE_TAG="${{ needs.build-image.outputs.image_tag }}"
+          OVERLAY_PATH=".opsera-healthcp/k8s/overlays/dev"
+
+          cd "${OVERLAY_PATH}"
+
+          # Update newName and newTag in kustomization.yaml
+          sed -i "s|newName:.*|newName: ${ECR_URI}|g" kustomization.yaml
+          sed -i "s|newTag:.*|newTag: ${IMAGE_TAG}|g" kustomization.yaml
+
+          echo "✅ Updated kustomization.yaml: ${ECR_URI}:${IMAGE_TAG}"
+          cat kustomization.yaml
+
+      - name: Validate Kustomize Build
+        run: |
+          OVERLAY_PATH=".opsera-healthcp/k8s/overlays/dev"
+          if ! kubectl kustomize "${OVERLAY_PATH}" > /dev/null 2>&1; then
+            echo "❌ Kustomize validation failed!"
+            kubectl kustomize "${OVERLAY_PATH}"
+            exit 1
+          fi
+          echo "✅ Kustomize build validation passed"
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and Push Manifests
+        run: |
+          IMAGE_TAG="${{ needs.build-image.outputs.image_tag }}"
+
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No manifest changes to commit"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "chore: update healthcp dev image to ${IMAGE_TAG} [skip ci]"
+
+          for i in {1..3}; do
+            if git push origin ${{ github.ref_name }}; then
+              echo "✅ Manifests pushed"
+              exit 0
+            fi
+            echo "Push failed, retrying... ($i/3)"
+            if ! git pull --rebase origin ${{ github.ref_name }}; then
+              git rebase --abort || true
+              git pull --no-rebase origin ${{ github.ref_name }}
+            fi
+            sleep 2
+          done
+          exit 1
+
+  # ── Stage 7: Create ArgoCD Application ────────────────────────────────────
+  create-argocd-app:
+    name: "07 - Create ArgoCD Application"
+    runs-on: ubuntu-latest
+    needs: [update-manifests]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Hub Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Apply ArgoCD Application (Idempotent)
+        run: |
+          APP_MANIFEST=".opsera-healthcp/argocd/dev/application.yaml"
+
+          if [ ! -f "${APP_MANIFEST}" ]; then
+            echo "❌ ArgoCD manifest not found: ${APP_MANIFEST}"
+            exit 1
+          fi
+
+          kubectl apply -f "${APP_MANIFEST}"
+          echo "✅ ArgoCD application created/updated"
+
+          kubectl get app ${{ env.ARGOCD_APP_NAME }} -n argocd
+          sleep 3
+
+  # ── Stage 8: Refresh ECR Secret (Spoke) ────────────────────────────────────
+  refresh-ecr-secret:
+    name: "08 - Refresh ECR Secret"
+    runs-on: ubuntu-latest
+    needs: [create-argocd-app]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Spoke Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Refresh ECR Pull Secret
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+
+          kubectl create secret docker-registry ecr-registry-secret \
+            --docker-server="${ECR_REGISTRY}" \
+            --docker-username=AWS \
+            --docker-password="${ECR_PASSWORD}" \
+            --namespace=${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "✅ ECR pull secret refreshed in ${{ env.NAMESPACE }}"
+
+  # ── Stage 9: ArgoCD Hard Refresh (Hub) ────────────────────────────────────
+  argocd-refresh:
+    name: "09 - ArgoCD Hard Refresh"
+    runs-on: ubuntu-latest
+    needs: [create-argocd-app]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Hub Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD Hard Refresh
+        run: |
+          kubectl patch app ${{ env.ARGOCD_APP_NAME }} \
+            -n argocd --type merge \
+            -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+
+          echo "✅ Hard refresh triggered"
+          sleep 5
+
+  # ── Stage 10: ArgoCD Sync ─────────────────────────────────────────────────
+  argocd-sync:
+    name: "10 - ArgoCD Sync"
+    runs-on: ubuntu-latest
+    needs: [refresh-ecr-secret, argocd-refresh]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Hub Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.HUB_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          kubectl patch app ${{ env.ARGOCD_APP_NAME }} \
+            -n argocd --type merge \
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD"}}}'
+
+          echo "✅ Sync triggered"
+
+      - name: Wait for Sync to Complete
+        run: |
+          for i in {1..60}; do
+            HEALTH=$(kubectl get app ${{ env.ARGOCD_APP_NAME }} \
+              -n argocd \
+              -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            OPERATION=$(kubectl get app ${{ env.ARGOCD_APP_NAME }} \
+              -n argocd \
+              -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Unknown")
+
+            echo "[$i/60] Health: ${HEALTH}, Operation: ${OPERATION}"
+
+            if [ "${HEALTH}" = "Healthy" ] && [ "${OPERATION}" = "Succeeded" ]; then
+              echo "✅ ArgoCD sync completed successfully"
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "⚠️ Sync did not complete in 10 minutes"
+          kubectl get app ${{ env.ARGOCD_APP_NAME }} -n argocd -o yaml
+          exit 1
+
+  # ── Stage 11: Verify Deployment (Spoke) ───────────────────────────────────
+  verify-deployment:
+    name: "11 - Verify Deployment"
+    runs-on: ubuntu-latest
+    needs: [argocd-sync]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Spoke Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Deployment to Exist
+        run: |
+          for i in {1..60}; do
+            if kubectl get deployment ${{ env.APP_NAME }} \
+                -n ${{ env.NAMESPACE }} &>/dev/null; then
+              echo "✅ Deployment exists"
+              break
+            fi
+            echo "⏳ Waiting for ArgoCD to create deployment... ($i/60)"
+            sleep 5
+          done
+
+          if ! kubectl get deployment ${{ env.APP_NAME }} \
+              -n ${{ env.NAMESPACE }} &>/dev/null; then
+            echo "❌ Deployment not found after 5 minutes"
+            exit 1
+          fi
+
+      - name: Wait for Deployment Ready
+        run: |
+          kubectl wait --for=condition=available --timeout=300s \
+            deployment/${{ env.APP_NAME }} \
+            -n ${{ env.NAMESPACE }}
+          echo "✅ Deployment is available"
+
+      - name: Verify Pods Running
+        run: |
+          kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+
+          RUNNING=$(kubectl get pods -n ${{ env.NAMESPACE }} \
+            --field-selector=status.phase=Running -o name | wc -l)
+
+          if [ "${RUNNING}" -eq 0 ]; then
+            echo "❌ No pods are running"
+            exit 1
+          fi
+          echo "✅ ${RUNNING} pod(s) running"
+
+      - name: Deployment Summary
+        run: |
+          IMAGE_TAG="${{ needs.build-image.outputs.image_tag }}"
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║  DEPLOYMENT COMPLETE ✅                                  ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║  App:     ${{ env.APP_NAME }}"
+          echo "║  Env:     ${{ env.ENVIRONMENT }}"
+          echo "║  URL:     https://healthcp-dev.agent.opsera.dev"
+          echo "║  Health:  https://healthcp-dev.agent.opsera.dev/health"
+          echo "╚══════════════════════════════════════════════════════════╝"
+
+  # ── Stage 12: Deployment Landscape (ABSOLUTE LAST) ────────────────────────
+  deployment-landscape:
+    name: "12 - Deployment Landscape"
+    runs-on: ubuntu-latest
+    needs: [verify-deployment]
+    if: success()
+    steps:
+      - name: Record Deployment Landscape
+        run: |
+          echo "📊 Deployment Landscape"
+          echo "App:         ${{ env.APP_NAME }}"
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+          echo "Tenant:      ${{ env.TENANT }}"
+          echo "Spoke:       ${{ env.SPOKE_CLUSTER }}"
+          echo "Namespace:   ${{ env.NAMESPACE }}"
+          echo "URL:         https://healthcp-dev.agent.opsera.dev"
+          echo "Commit:      ${{ github.sha }}"
+          echo "Deployed by: ${{ github.actor }}"
+          echo "Timestamp:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"

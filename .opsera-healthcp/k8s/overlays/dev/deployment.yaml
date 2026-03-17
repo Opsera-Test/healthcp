@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcp
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: app
+          image: PLACEHOLDER_ECR_URI:v1.0.0
+          env:
+            - name: PORT
+              value: "8080"
+            - name: ENVIRONMENT
+              value: "dev"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
