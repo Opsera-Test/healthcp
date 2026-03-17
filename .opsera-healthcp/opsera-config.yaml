@@ -1,0 +1,41 @@
+app_name: healthcp
+tenant: opsera
+cloud_provider: AWS
+region: us-west-2
+region_short: usw2
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+argocd_server: argocd-usw2.agent.opsera.dev
+domain: agent.opsera.dev
+github_repo: Opsera-Test/healthcp
+branch: main
+
+environments:
+  dev:
+    deployment_strategy: rolling
+    namespace: opsera-healthcp-dev
+    ingress_host: healthcp-dev.agent.opsera.dev
+    replicas: 1
+
+integrations:
+  gitleaks:
+    enabled: true
+    mode: warn
+  grype:
+    enabled: true
+    mode: warn
+  sonarqube:
+    enabled: false
+  slack:
+    enabled: false
+  jira:
+    enabled: false
+  prometheus:
+    enabled: false
+  newrelic:
+    enabled: false
+
+app_type: nodejs-frontend
+framework: react-vite
+port: 8080
+health_check_path: /health
